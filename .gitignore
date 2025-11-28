@@ -69,3 +69,7 @@ logs
 videotrans/core/
 videotrans/planner/
 videotrans/util/segments.py
+
+# Local files
+nul
+run-conda.bat
