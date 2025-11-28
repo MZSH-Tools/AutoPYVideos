@@ -1,0 +1,80 @@
+# 系统托盘模块
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
+from PySide6.QtCore import QObject, Signal
+
+from MainWindow import MainWindow
+
+
+class TrayIcon(QObject):
+    """系统托盘图标"""
+
+    ShowWindowSignal = Signal()
+
+    def __init__(self, App: QApplication):
+        super().__init__()
+        self.App = App
+        self.MainWin = None
+        self.TrayIcon = None
+        self.SetupTray()
+
+    def SetupTray(self):
+        """初始化托盘图标"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            print("System tray not available")
+            return
+
+        # 创建图标
+        Pixmap = QPixmap(64, 64)
+        Pixmap.fill(QColor(70, 130, 180))
+        Painter = QPainter(Pixmap)
+        Painter.setPen(QColor(255, 255, 255))
+        Painter.drawText(Pixmap.rect(), 0x0084, "AV")
+        Painter.end()
+        Icon = QIcon(Pixmap)
+
+        self.TrayIcon = QSystemTrayIcon(self)
+        self.TrayIcon.setIcon(Icon)
+        self.TrayIcon.setToolTip("AutoPYVideos Manager")
+
+        Menu = QMenu()
+
+        OpenAction = QAction("Open Manager", Menu)
+        OpenAction.triggered.connect(self.ShowMainWindow)
+        Menu.addAction(OpenAction)
+
+        Menu.addSeparator()
+
+        QuitAction = QAction("Exit", Menu)
+        QuitAction.triggered.connect(self.Quit)
+        Menu.addAction(QuitAction)
+
+        self.TrayIcon.setContextMenu(Menu)
+        self.TrayIcon.activated.connect(self.OnTrayActivated)
+        self.TrayIcon.show()
+
+    def ShowMainWindow(self):
+        """显示主窗口"""
+        if self.MainWin is None:
+            self.MainWin = MainWindow()
+            self.MainWin.Closed.connect(self.OnWindowClosed)
+
+        self.MainWin.show()
+        self.MainWin.raise_()
+        self.MainWin.activateWindow()
+
+    def OnWindowClosed(self):
+        """窗口关闭时的处理"""
+        pass
+
+    def OnTrayActivated(self, Reason):
+        """托盘图标被激活"""
+        if Reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.ShowMainWindow()
+
+    def Quit(self):
+        """退出程序"""
+        if self.MainWin:
+            self.MainWin.close()
+        self.TrayIcon.hide()
+        self.App.quit()
