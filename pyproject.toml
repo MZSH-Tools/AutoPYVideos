@@ -255,6 +255,7 @@ dependencies = [
     "modelscope>=1.33.0",
     "funasr>=1.2.7",
     "gradio-client>=2.0.1",
+    "yt-dlp>=2025.11.12",
 ]
 
 [[tool.uv.index]]
