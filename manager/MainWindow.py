@@ -1,14 +1,35 @@
 # 管理界面主窗口
+import sys
 from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFrame, QSplitter, QProgressBar, QApplication
+    QLabel, QFrame, QSplitter, QProgressBar, QApplication, QTextEdit
 )
-from PySide6.QtCore import Signal, Qt, QThread
+from PySide6.QtCore import Signal, Qt, QThread, QObject
 from PySide6.QtGui import QCloseEvent, QColor
 
 from Cache import TaskManager, TaskStatus
+
+
+class LogSignal(QObject):
+    """日志信号，用于跨线程发送日志"""
+    Message = Signal(str)
+
+LogEmitter = LogSignal()
+
+
+class LogWriter:
+    """重定向stdout到GUI"""
+    def __init__(self):
+        self.Terminal = sys.__stdout__
+
+    def write(self, Msg):
+        if Msg.strip():
+            LogEmitter.Message.emit(Msg.strip())
+
+    def flush(self):
+        pass
 
 
 class FetchInfoThread(QThread):
@@ -27,9 +48,9 @@ class FetchInfoThread(QThread):
 
 class ProcessThread(QThread):
     """后台处理任务的线程（下载 → 识别 → 翻译 → 配音 → 合成）"""
-    Progress = Signal(str, int, str)   # Key, Percent, Stage
-    StageChanged = Signal(str, str)    # Key, Stage
-    Finished = Signal(str, bool)       # Key, Success
+    Progress = Signal(str, int, str, float)   # Key, Percent, Stage, Speed
+    StageChanged = Signal(str, str)           # Key, Stage
+    Finished = Signal(str, bool)              # Key, Success
 
     def __init__(self, TaskMgr: TaskManager, Key: str):
         super().__init__()
@@ -48,8 +69,8 @@ class ProcessThread(QThread):
                 self.StageChanged.emit(self.Key, "downloading")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Downloading, Progress=0)
 
-                def OnDownloadProgress(Percent, Status):
-                    self.Progress.emit(self.Key, Percent, "downloading")
+                def OnDownloadProgress(Percent, Status, Speed):
+                    self.Progress.emit(self.Key, Percent, "downloading", Speed or 0)
 
                 Success = self.TaskMgr.Download(self.Key, OnDownloadProgress)
                 if not Success:
@@ -88,6 +109,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.TaskMgr = TaskManager()
         self.CurKey = None
+        self.CurSpeed = 0  # 当前下载速度 bytes/s
         self.ProcessThread = None  # 当前处理线程（同时只处理一个）
         self.SetupUI()
         self.RefreshList()
@@ -160,6 +182,11 @@ class MainWindow(QMainWindow):
         self.DetailProgress.setVisible(False)
         DetailLayout.addWidget(self.DetailProgress)
 
+        self.DetailSpeed = QLabel("")
+        self.DetailSpeed.setStyleSheet("color: #0088ff; padding: 5px 10px;")
+        self.DetailSpeed.setVisible(False)
+        DetailLayout.addWidget(self.DetailSpeed)
+
         self.DetailDuration = QLabel("")
         self.DetailDuration.setStyleSheet("color: #888; padding: 5px 10px;")
         DetailLayout.addWidget(self.DetailDuration)
@@ -183,10 +210,28 @@ class MainWindow(QMainWindow):
 
         DetailLayout.addStretch()
 
+        Splitter.setSizes([250, 650])
+
+        # 底部日志区域
+        self.LogText = QTextEdit()
+        self.LogText.setReadOnly(True)
+        self.LogText.setMaximumHeight(120)
+        self.LogText.setStyleSheet("font-family: Consolas, monospace; font-size: 12px; background: #f5f5f5; color: #333;")
+        Layout.addWidget(self.LogText)
+
+        # 连接日志信号
+        LogEmitter.Message.connect(self.AppendLog)
+        sys.stdout = LogWriter()
+
         # 存储后台线程
         self.FetchThreads = []
 
-        Splitter.setSizes([250, 650])
+    def AppendLog(self, Msg: str):
+        """添加日志"""
+        TimeStr = datetime.now().strftime("%H:%M:%S")
+        self.LogText.append(f"[{TimeStr}] {Msg}")
+        # 滚动到底部
+        self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
 
     def OnSearch(self):
         """搜索/添加链接"""
@@ -217,10 +262,15 @@ class MainWindow(QMainWindow):
 
     def OnFetchInfoFinished(self, Key: str, Success: bool):
         """视频信息获取完成"""
+        print(f"FetchInfo finished: Key={Key}, Success={Success}")
+        # 重新加载任务数据
+        self.TaskMgr.Load()
+        Task = self.TaskMgr.Get(Key)
+        if Task:
+            print(f"Task Title: {Task.get('Title')}, Author: {Task.get('Author')}")
         # 刷新列表和详情
         self.RefreshList()
         if self.CurKey == Key:
-            Task = self.TaskMgr.Get(Key)
             if Task:
                 self.UpdateDetail(Key, Task)
         # 尝试启动自动处理
@@ -268,11 +318,13 @@ class MainWindow(QMainWindow):
         # 选中这个任务
         self.SelectTask(Key)
 
-    def OnProcessProgress(self, Key: str, Percent: int, Stage: str):
+    def OnProcessProgress(self, Key: str, Percent: int, Stage: str, Speed: float):
         """处理进度更新"""
         self.RefreshList()
         if self.CurKey == Key:
             self.DetailProgress.setValue(Percent)
+            self.CurSpeed = Speed
+            self.UpdateSpeedDisplay()
 
     def OnStageChanged(self, Key: str, Stage: str):
         """处理阶段变化"""
@@ -292,6 +344,20 @@ class MainWindow(QMainWindow):
         # 尝试处理下一个任务
         self.TryStartProcessing()
 
+    def UpdateSpeedDisplay(self):
+        """更新速度显示"""
+        if self.CurSpeed > 0:
+            if self.CurSpeed >= 1024 * 1024:
+                SpeedStr = f"{self.CurSpeed / 1024 / 1024:.1f} MB/s"
+            elif self.CurSpeed >= 1024:
+                SpeedStr = f"{self.CurSpeed / 1024:.1f} KB/s"
+            else:
+                SpeedStr = f"{self.CurSpeed:.0f} B/s"
+            self.DetailSpeed.setText(f"速度: {SpeedStr}")
+            self.DetailSpeed.setVisible(True)
+        else:
+            self.DetailSpeed.setVisible(False)
+
     def RefreshList(self):
         """刷新任务列表"""
         self.TaskList.clear()
@@ -303,12 +369,14 @@ class MainWindow(QMainWindow):
     def CreateListItem(self, Key: str, Task: dict) -> QListWidgetItem:
         """创建列表项"""
         Timestamp = int(Key) / 1000
-        TimeStr = datetime.fromtimestamp(Timestamp).strftime("%m-%d %H:%M")
+        TimeStr = datetime.fromtimestamp(Timestamp).strftime("%Y-%m-%d %H:%M")
+        Title = Task.get("Title") or "加载中..."
 
         Status = Task["Status"]
         Color = StatusColors.get(Status, "#666666")
 
-        Item = QListWidgetItem(TimeStr)
+        DisplayText = f"{TimeStr}\n{Title[:20]}..." if len(Title) > 20 else f"{TimeStr}\n{Title}"
+        Item = QListWidgetItem(DisplayText)
         Item.setData(Qt.ItemDataRole.UserRole, Key)
         Item.setForeground(QColor(Color))
         return Item
@@ -385,14 +453,19 @@ class MainWindow(QMainWindow):
         # 添加时间
         self.DetailTime.setText(f"添加时间: {TimeStr}")
 
-        # 进度条（下载、识别、翻译、配音、合成时显示）
+        # 进度条和速度（下载、识别、翻译、配音、合成时显示）
         ProcessingStatuses = ["downloading", "recognizing", "translating", "dubbing", "merging"]
         if Status in ProcessingStatuses:
             self.DetailProgress.setVisible(True)
             self.DetailProgress.setValue(Progress)
+            # 速度只在下载时显示
+            if Status == "downloading":
+                self.UpdateSpeedDisplay()
+            else:
+                self.DetailSpeed.setVisible(False)
         else:
             self.DetailProgress.setVisible(False)
-
+            self.DetailSpeed.setVisible(False)
 
         # 发布链接
         if PublishUrl:
@@ -412,6 +485,7 @@ class MainWindow(QMainWindow):
     def ClearDetail(self):
         """清空详情面板"""
         self.CurKey = None
+        self.CurSpeed = 0
         self.DetailTitle.setText("选择一个任务")
         self.DetailAuthor.setText("")
         self.DetailUrl.setText("")
@@ -419,6 +493,7 @@ class MainWindow(QMainWindow):
         self.DetailDuration.setText("")
         self.DetailTime.setText("")
         self.DetailProgress.setVisible(False)
+        self.DetailSpeed.setVisible(False)
         self.DetailPublishUrl.setVisible(False)
         self.DetailError.setVisible(False)
 

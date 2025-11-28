@@ -19,11 +19,15 @@ class TaskStatus(Enum):
     Published = "published"     # 已发布
 
 
+PROXY = "http://127.0.0.1:7890"
+
+
 def FetchVideoInfo(Url: str) -> dict | None:
     """获取视频信息（标题、作者等）"""
     try:
         import yt_dlp
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as Ydl:
+        Options = {"quiet": True, "no_warnings": True, "proxy": PROXY}
+        with yt_dlp.YoutubeDL(Options) as Ydl:
             Info = Ydl.extract_info(Url, download=False)
             return {
                 "Title": Info.get("title", ""),
@@ -47,11 +51,11 @@ class DownloadProgress:
         if D["status"] == "downloading":
             Total = D.get("total_bytes") or D.get("total_bytes_estimate", 0)
             Downloaded = D.get("downloaded_bytes", 0)
-            if Total > 0:
-                Percent = int(Downloaded * 100 / Total)
-                self.Callback(Percent, "downloading")
+            Speed = D.get("speed", 0)  # bytes/s
+            Percent = int(Downloaded * 100 / Total) if Total > 0 else 0
+            self.Callback(Percent, "downloading", Speed)
         elif D["status"] == "finished":
-            self.Callback(100, "finished")
+            self.Callback(100, "finished", 0)
 
 
 def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | None:
@@ -71,6 +75,7 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
         "quiet": True,
         "no_warnings": True,
         "continuedl": True,  # 断点续传
+        "proxy": PROXY,
     }
 
     if ProgressCallback:
@@ -160,10 +165,13 @@ class TaskManager:
         """获取视频信息并更新任务"""
         Task = self.Get(Key)
         if not Task:
+            print(f"FetchInfo: Task {Key} not found")
             return False
 
+        print(f"FetchInfo: Fetching info for {Task['Url']}")
         Info = FetchVideoInfo(Task["Url"])
         if Info:
+            print(f"FetchInfo: Got title '{Info['Title']}', author '{Info['Author']}'")
             self.Update(Key,
                 Title=Info["Title"],
                 Author=Info["Author"],
@@ -173,6 +181,7 @@ class TaskManager:
                 VideoId=Info["VideoId"]
             )
             return True
+        print("FetchInfo: Failed to get info")
         return False
 
     def GetTaskDir(self, Key: str) -> Path:
@@ -232,10 +241,10 @@ class TaskManager:
         self.Update(Key, Status=TaskStatus.Downloading, Progress=0, Error="")
         TaskDir = self.GetTaskDir(Key)
 
-        def OnProgress(Percent, Status):
+        def OnProgress(Percent, Status, Speed):
             self.Update(Key, Progress=Percent)
             if ProgressCallback:
-                ProgressCallback(Percent, Status)
+                ProgressCallback(Percent, Status, Speed)
 
         VideoPath = DownloadVideo(Task["Url"], TaskDir, OnProgress)
         if VideoPath:

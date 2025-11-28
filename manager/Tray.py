@@ -53,6 +53,9 @@ class TrayIcon(QObject):
         self.TrayIcon.activated.connect(self.OnTrayActivated)
         self.TrayIcon.show()
 
+        # 首次运行弹出管理界面
+        self.ShowMainWindow()
+
     def ShowMainWindow(self):
         """显示主窗口"""
         if self.MainWin is None:
