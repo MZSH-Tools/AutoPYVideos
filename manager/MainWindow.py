@@ -11,7 +11,7 @@ from PySide6.QtGui import QCloseEvent, QColor
 
 from pathlib import Path
 from Task import TaskManager, TaskStatus
-from Audio import ExtractAudio
+from Extract import ExtractAudio
 from Recognize import RecognizeAudio
 from Translate import TranslateSrt
 
@@ -96,18 +96,16 @@ class ProcessThread(QThread):
                     self.Finished.emit(self.Key, False)
                     return
 
-            # 阶段 2: 识别
+            # 阶段 2: 提取音频
             Task = self.TaskMgr.Get(self.Key)
-            if Task["Status"] in [TaskStatus.Downloading.value, TaskStatus.Recognizing.value]:
-                # 进入识别阶段
-                self.StageChanged.emit(self.Key, "recognizing")
-                self.TaskMgr.Update(self.Key, Status=TaskStatus.Recognizing, Progress=0)
+            if Task["Status"] in [TaskStatus.Downloading.value, TaskStatus.Extracting.value]:
+                self.StageChanged.emit(self.Key, "extracting")
+                self.TaskMgr.Update(self.Key, Status=TaskStatus.Extracting, Progress=0)
 
                 TaskDir = self.TaskMgr.GetTaskDir(self.Key)
-                VideoPath = Path(Task["VideoPath"])
-
-                # 提取音频
+                VideoPath = TaskDir / "video.mp4"
                 AudioPath = TaskDir / "audio.wav"
+
                 if not AudioPath.exists():
                     AudioPath = ExtractAudio(VideoPath, AudioPath)
                     if not AudioPath:
@@ -115,12 +113,22 @@ class ProcessThread(QThread):
                         self.Finished.emit(self.Key, False)
                         return
 
-                # 语音识别（英文）
+                self.TaskMgr.Update(self.Key, Progress=100)
+
+            # 阶段 3: 语音识别
+            Task = self.TaskMgr.Get(self.Key)
+            if Task["Status"] in [TaskStatus.Extracting.value, TaskStatus.Recognizing.value]:
+                self.StageChanged.emit(self.Key, "recognizing")
+                self.TaskMgr.Update(self.Key, Status=TaskStatus.Recognizing, Progress=0)
+
+                TaskDir = self.TaskMgr.GetTaskDir(self.Key)
                 SrtPath = TaskDir / "en.srt"
+
                 def OnRecognizeProgress(Percent, Text):
                     self.Progress.emit(self.Key, Percent, "recognizing", 0)
 
                 if not SrtPath.exists():
+                    AudioPath = TaskDir / "audio.wav"
                     SrtPath = RecognizeAudio(AudioPath, SrtPath, Language="en",
                                              ProgressCallback=OnRecognizeProgress)
                     if not SrtPath:
@@ -128,7 +136,7 @@ class ProcessThread(QThread):
                         self.Finished.emit(self.Key, False)
                         return
 
-            # 阶段 3: 翻译（英文 → 中文）
+            # 阶段 4: 翻译（英文 → 中文）
             Task = self.TaskMgr.Get(self.Key)
             if Task["Status"] in [TaskStatus.Recognizing.value, TaskStatus.Translating.value]:
                 self.StageChanged.emit(self.Key, "translating")
@@ -150,7 +158,7 @@ class ProcessThread(QThread):
                         self.Finished.emit(self.Key, False)
                         return
 
-            # 阶段 4-5: 配音、合成（待实现）
+            # 阶段 5-6: 配音、合成（待实现）
             # 暂时直接标记为待发布
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Ready, Progress=100)
             self.Finished.emit(self.Key, True)
@@ -164,6 +172,7 @@ class ProcessThread(QThread):
 StatusColors = {
     "queued": "#999999",      # 灰色 - 等待
     "downloading": "#0088ff", # 蓝色 - 下载中
+    "extracting": "#ff8800",  # 橙色 - 提取中
     "recognizing": "#ff8800", # 橙色 - 识别中
     "translating": "#ff8800", # 橙色 - 翻译中
     "dubbing": "#ff8800",     # 橙色 - 配音中
@@ -233,15 +242,10 @@ class MainWindow(QMainWindow):
         LabelStyle = "font-size: 13px; color: #333; padding: 3px 10px;"
         HeaderStyle = LabelStyle + "font-weight: bold;"
 
-        # 处理流程（第一部分）
-        PipelineHeader = QLabel("处理流程:")
-        PipelineHeader.setStyleSheet(HeaderStyle)
-        DetailLayout.addWidget(PipelineHeader)
-
-        # 当前状态行
+        # 状态行
         StatusLayout = QHBoxLayout()
         self.DetailStatus = QLabel("")
-        self.DetailStatus.setStyleSheet("font-size: 13px; padding: 3px 20px;")
+        self.DetailStatus.setStyleSheet("font-size: 13px; padding: 3px 10px;")
         StatusLayout.addWidget(self.DetailStatus)
         StatusLayout.addStretch()
         self.DetailProgressLabel = QLabel("")
@@ -249,24 +253,9 @@ class MainWindow(QMainWindow):
         StatusLayout.addWidget(self.DetailProgressLabel)
         DetailLayout.addLayout(StatusLayout)
 
-        # 流水线阶段
-        self.StageLabels = {}
-        StageNames = [
-            ("downloading", "下载视频"),
-            ("recognizing", "语音识别"),
-            ("translating", "字幕翻译"),
-            ("dubbing", "语音合成"),
-            ("merging", "视频合成"),
-        ]
-        for StageKey, StageName in StageNames:
-            Label = QLabel(f"  ○ {StageName}")
-            Label.setStyleSheet("font-size: 13px; color: #999; padding: 2px 20px;")
-            DetailLayout.addWidget(Label)
-            self.StageLabels[StageKey] = Label
+        DetailLayout.addSpacing(10)
 
-        DetailLayout.addSpacing(15)
-
-        # 视频信息（第二部分）
+        # 视频信息
         InfoHeader = QLabel("视频信息:")
         InfoHeader.setStyleSheet(HeaderStyle)
         DetailLayout.addWidget(InfoHeader)
@@ -281,10 +270,6 @@ class MainWindow(QMainWindow):
         self.DetailTitle.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.DetailTitle.setWordWrap(True)
         DetailLayout.addWidget(self.DetailTitle)
-
-        self.DetailDuration = QLabel("")
-        self.DetailDuration.setStyleSheet(LabelStyle + "padding-left: 20px;")
-        DetailLayout.addWidget(self.DetailDuration)
 
         # 原链接 + 复制按钮
         UrlLayout = QHBoxLayout()
@@ -328,12 +313,48 @@ class MainWindow(QMainWindow):
 
         Splitter.setSizes([250, 650])
 
-        # 底部日志区域
+        # 底部区域：左侧当前任务流程 + 右侧日志
+        BottomLayout = QHBoxLayout()
+
+        # 左侧：当前任务流程
+        PipelinePanel = QFrame()
+        PipelinePanel.setFrameShape(QFrame.Shape.StyledPanel)
+        PipelinePanel.setFixedWidth(200)
+        PipelineLayout = QVBoxLayout(PipelinePanel)
+        PipelineLayout.setContentsMargins(10, 5, 10, 5)
+
+        # 当前任务标题
+        self.PipelineTitle = QLabel("当前任务: 无")
+        self.PipelineTitle.setStyleSheet("font-size: 12px; font-weight: bold; color: #333;")
+        PipelineLayout.addWidget(self.PipelineTitle)
+
+        # 流水线阶段
+        self.StageLabels = {}
+        StageNames = [
+            ("downloading", "下载视频"),
+            ("extracting", "提取音频"),
+            ("recognizing", "语音识别"),
+            ("translating", "字幕翻译"),
+            ("dubbing", "语音合成"),
+            ("merging", "视频合成"),
+        ]
+        for StageKey, StageName in StageNames:
+            Label = QLabel(f"○ {StageName}")
+            Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
+            PipelineLayout.addWidget(Label)
+            self.StageLabels[StageKey] = Label
+
+        PipelineLayout.addStretch()
+        BottomLayout.addWidget(PipelinePanel)
+
+        # 右侧：日志
         self.LogText = QTextEdit()
         self.LogText.setReadOnly(True)
-        self.LogText.setMaximumHeight(120)
+        self.LogText.setMaximumHeight(140)
         self.LogText.setStyleSheet("font-family: Consolas, monospace; font-size: 12px; background: #f5f5f5; color: #333;")
-        Layout.addWidget(self.LogText)
+        BottomLayout.addWidget(self.LogText)
+
+        Layout.addLayout(BottomLayout)
 
         # 连接日志信号
         LogEmitter.Message.connect(self.AppendLog)
@@ -401,6 +422,7 @@ class MainWindow(QMainWindow):
         """选中正在处理的任务，如果没有则选中第一个任务"""
         ProcessingStatuses = [
             TaskStatus.Downloading.value,
+            TaskStatus.Extracting.value,
             TaskStatus.Recognizing.value,
             TaskStatus.Translating.value,
             TaskStatus.Dubbing.value,
@@ -441,38 +463,57 @@ class MainWindow(QMainWindow):
     def OnProcessProgress(self, Key: str, Percent: int, Stage: str, Speed: float):
         """处理进度更新"""
         self.RefreshList()
+        self.CurSpeed = Speed
+        # 更新流水线显示（当前处理任务）
+        Task = self.TaskMgr.Get(Key)
+        if Task:
+            self.UpdatePipelineDisplay(Key, Task["Status"], Percent)
+        # 更新详情面板进度
         if self.CurKey == Key:
-            self.CurSpeed = Speed
             self.UpdateProgressDisplay(Percent, Stage)
 
     def OnStageChanged(self, Key: str, Stage: str):
         """处理阶段变化"""
         self.RefreshList()
-        if self.CurKey == Key:
-            Task = self.TaskMgr.Get(Key)
-            if Task:
-                self.UpdateDetail(Key, Task)
+        # 更新流水线显示
+        Task = self.TaskMgr.Get(Key)
+        if Task:
+            self.UpdatePipelineDisplay(Key, Task["Status"], Task["Progress"])
+        # 更新详情面板
+        if self.CurKey == Key and Task:
+            self.UpdateDetail(Key, Task)
 
     def OnProcessFinished(self, Key: str, Success: bool):
         """处理完成"""
         self.RefreshList()
-        if self.CurKey == Key:
-            Task = self.TaskMgr.Get(Key)
-            if Task:
-                self.UpdateDetail(Key, Task)
+        Task = self.TaskMgr.Get(Key)
+        if Task:
+            self.UpdatePipelineDisplay(Key, Task["Status"], 100)
+        # 更新详情面板
+        if self.CurKey == Key and Task:
+            self.UpdateDetail(Key, Task)
         # 尝试处理下一个任务
         self.TryStartProcessing()
 
-    def UpdatePipelineDisplay(self, Status: str, Progress: int):
-        """更新流水线阶段显示"""
-        Stages = ["downloading", "recognizing", "translating", "dubbing", "merging"]
+    def UpdatePipelineDisplay(self, Key: str, Status: str, Progress: int):
+        """更新流水线阶段显示（显示当前处理任务）"""
+        Stages = ["downloading", "extracting", "recognizing", "translating", "dubbing", "merging"]
         StageNames = {
             "downloading": "下载视频",
+            "extracting": "提取音频",
             "recognizing": "语音识别",
             "translating": "字幕翻译",
             "dubbing": "语音合成",
             "merging": "视频合成",
         }
+
+        # 更新标题（显示任务时间）
+        if Key:
+            Timestamp = int(Key) / 1000
+            TimeStr = datetime.fromtimestamp(Timestamp).strftime("%m-%d %H:%M")
+            self.PipelineTitle.setText(f"当前任务: {TimeStr}")
+        else:
+            self.PipelineTitle.setText("当前任务: 无")
 
         # 找到当前阶段的索引
         CurIndex = -1
@@ -489,19 +530,19 @@ class MainWindow(QMainWindow):
             Name = StageNames[Stage]
             if I < CurIndex:
                 # 已完成
-                Label.setText(f"  ✓ {Name}")
-                Label.setStyleSheet("font-size: 13px; color: #00aa00; padding: 2px 10px;")
+                Label.setText(f"✓ {Name}")
+                Label.setStyleSheet("font-size: 11px; color: #00aa00; padding: 1px 5px;")
             elif I == CurIndex:
                 # 进行中
                 if Progress > 0:
-                    Label.setText(f"  ◉ {Name} ({Progress}%)")
+                    Label.setText(f"◉ {Name} ({Progress}%)")
                 else:
-                    Label.setText(f"  ◉ {Name}...")
-                Label.setStyleSheet("font-size: 13px; color: #0088ff; padding: 2px 10px; font-weight: bold;")
+                    Label.setText(f"◉ {Name}...")
+                Label.setStyleSheet("font-size: 11px; color: #0088ff; padding: 1px 5px; font-weight: bold;")
             else:
                 # 等待中
-                Label.setText(f"  ○ {Name}")
-                Label.setStyleSheet("font-size: 13px; color: #999; padding: 2px 10px;")
+                Label.setText(f"○ {Name}")
+                Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
 
     def UpdateProgressDisplay(self, Percent: int, Stage: str):
         """更新进度显示（状态行右侧）"""
@@ -547,6 +588,7 @@ class MainWindow(QMainWindow):
         StatusText = {
             "queued": "等待中",
             "downloading": "下载中...",
+            "extracting": "提取中...",
             "recognizing": "识别中...",
             "translating": "翻译中...",
             "dubbing": "配音中...",
@@ -592,13 +634,13 @@ class MainWindow(QMainWindow):
         Url = Task["Url"]
         Status = Task["Status"]
         Progress = Task["Progress"]
-        Duration = Task.get("Duration", 0)
         PublishUrl = Task.get("PublishUrl", "")
         Error = Task.get("Error", "")
 
         StatusText = {
             "queued": "等待中",
             "downloading": "下载中...",
+            "extracting": "提取中...",
             "recognizing": "识别中...",
             "translating": "翻译中...",
             "dubbing": "配音中...",
@@ -616,27 +658,16 @@ class MainWindow(QMainWindow):
         self.CurUrl = Url  # 保存用于复制
         self.CopyUrlBtn.setVisible(True)
 
-        # 视频时长
-        if Duration > 0:
-            Minutes = Duration // 60
-            Seconds = Duration % 60
-            self.DetailDuration.setText(f"视频时长: {Minutes}:{Seconds:02d}")
-        else:
-            self.DetailDuration.setText("")
-
         # 状态
         self.DetailStatus.setText(f"状态: {StatusText}")
         self.DetailStatus.setStyleSheet(f"font-size: 13px; padding: 3px 10px; color: {Color};")
 
         # 进度显示（状态行右侧）
-        ProcessingStatuses = ["downloading", "recognizing", "translating", "dubbing", "merging"]
+        ProcessingStatuses = ["downloading", "extracting", "recognizing", "translating", "dubbing", "merging"]
         if Status in ProcessingStatuses and Progress > 0:
             self.UpdateProgressDisplay(Progress, Status)
         else:
             self.DetailProgressLabel.setText("")
-
-        # 更新流水线阶段显示
-        self.UpdatePipelineDisplay(Status, Progress)
 
         # 发布链接（可编辑）
         self.PublishUrlEdit.setText(PublishUrl)
@@ -684,12 +715,9 @@ class MainWindow(QMainWindow):
         self.DetailAuthor.setText("")
         self.DetailTitle.setText("")
         self.DetailUrl.setText("")
-        self.DetailDuration.setText("")
         self.CopyUrlBtn.setVisible(False)
         self.PublishUrlEdit.setText("")
         self.DetailError.setVisible(False)
-        # 重置流水线显示
-        self.UpdatePipelineDisplay("queued", 0)
 
     def closeEvent(self, Event: QCloseEvent):
         """关闭窗口时隐藏而非退出"""

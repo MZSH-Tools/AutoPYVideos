@@ -15,8 +15,6 @@ def FetchVideoInfo(Url: str) -> dict | None:
             return {
                 "Title": Info.get("title", ""),
                 "Author": Info.get("uploader") or Info.get("channel", ""),
-                "Duration": Info.get("duration", 0),
-                "Description": Info.get("description", ""),
                 "Thumbnail": Info.get("thumbnail", ""),
                 "VideoId": Info.get("id", ""),
             }

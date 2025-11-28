@@ -1,11 +1,11 @@
-# 任务管理模块
+# 任务管理模块（文件夹驱动）
 import json
 import time
 import shutil
 from pathlib import Path
 from enum import Enum
 
-from Storage import GetVideoDir, GetTasksPath
+from Storage import GetTasksDir, ListTaskDirs
 from Download import FetchVideoInfo, DownloadVideo
 
 
@@ -13,6 +13,7 @@ class TaskStatus(Enum):
     """任务状态"""
     Queued = "queued"
     Downloading = "downloading"
+    Extracting = "extracting"
     Recognizing = "recognizing"
     Translating = "translating"
     Dubbing = "dubbing"
@@ -21,26 +22,89 @@ class TaskStatus(Enum):
     Published = "published"
 
 
+# 文件名 → 状态映射（根据文件存在推断状态）
+FILE_STATUS_MAP = [
+    ("output.mp4", TaskStatus.Ready),      # 有最终输出 → 待发布
+    ("zh-cn.wav", TaskStatus.Merging),     # 有配音 → 合成中
+    ("zh-cn.srt", TaskStatus.Dubbing),     # 有中文字幕 → 配音中
+    ("en.srt", TaskStatus.Translating),    # 有英文字幕 → 翻译中
+    ("audio.wav", TaskStatus.Recognizing), # 有音频 → 识别中
+    ("video.mp4", TaskStatus.Extracting),  # 有视频 → 提取中
+]
+
+
+def InferStatus(TaskDir: Path) -> TaskStatus:
+    """根据目录内文件推断任务状态"""
+    # 检查是否已发布
+    InfoPath = TaskDir / "info.json"
+    if InfoPath.exists():
+        try:
+            with open(InfoPath, "r", encoding="utf-8") as F:
+                Info = json.load(F)
+                if Info.get("PublishUrl"):
+                    return TaskStatus.Published
+        except:
+            pass
+
+    # 根据文件存在推断
+    for FileName, Status in FILE_STATUS_MAP:
+        if (TaskDir / FileName).exists():
+            return Status
+
+    return TaskStatus.Queued
+
+
 class TaskManager:
-    """任务管理器"""
+    """任务管理器（文件夹驱动）"""
 
     def __init__(self):
-        self.Path = GetTasksPath()
+        self.Tasks = {}  # Key -> Task dict 缓存
+        self.Sync()
+
+    def Sync(self):
+        """从文件夹同步任务状态"""
         self.Tasks = {}
-        self.Load()
+        for TaskDir in ListTaskDirs():
+            Key = TaskDir.name
+            Task = self.LoadTask(TaskDir)
+            if Task:
+                self.Tasks[Key] = Task
 
-    def Load(self):
-        """加载任务"""
-        if self.Path.exists():
-            with open(self.Path, "r", encoding="utf-8") as F:
-                self.Tasks = json.load(F)
-        else:
-            self.Tasks = {}
+    def LoadTask(self, TaskDir: Path) -> dict | None:
+        """从目录加载任务"""
+        InfoPath = TaskDir / "info.json"
+        if not InfoPath.exists():
+            return None
 
-    def Save(self):
-        """保存任务"""
-        with open(self.Path, "w", encoding="utf-8") as F:
-            json.dump(self.Tasks, F, ensure_ascii=False, indent=2)
+        try:
+            with open(InfoPath, "r", encoding="utf-8") as F:
+                Task = json.load(F)
+            # 推断实际状态
+            Task["Status"] = InferStatus(TaskDir).value
+            Task["Progress"] = 0
+            return Task
+        except:
+            return None
+
+    def SaveTask(self, Key: str):
+        """保存任务信息到 info.json"""
+        if Key not in self.Tasks:
+            return
+        Task = self.Tasks[Key].copy()
+        # 不保存运行时状态
+        Task.pop("Status", None)
+        Task.pop("Progress", None)
+
+        TaskDir = self.GetTaskDir(Key)
+        InfoPath = TaskDir / "info.json"
+        with open(InfoPath, "w", encoding="utf-8") as F:
+            json.dump(Task, F, ensure_ascii=False, indent=2)
+
+    def GetTaskDir(self, Key: str) -> Path:
+        """获取任务目录"""
+        TaskDir = GetTasksDir() / Key
+        TaskDir.mkdir(parents=True, exist_ok=True)
+        return TaskDir
 
     def Add(self, Url: str) -> str:
         """添加任务，返回时间戳 Key"""
@@ -49,25 +113,20 @@ class TaskManager:
             "Url": Url,
             "Title": "",
             "Author": "",
-            "Duration": 0,
-            "Description": "",
             "Thumbnail": "",
             "VideoId": "",
+            "PublishUrl": "",
+            "Error": "",
             "Status": TaskStatus.Queued.value,
             "Progress": 0,
-            "VideoPath": "",
-            "OutputPath": "",
-            "PublishUrl": "",
-            "Error": ""
         }
-        self.Save()
+        self.SaveTask(Key)
         return Key
 
     def FetchInfo(self, Key: str) -> bool:
-        """获取视频信息并更新任务"""
+        """获取视频信息"""
         Task = self.Get(Key)
         if not Task:
-            print(f"FetchInfo: Task {Key} not found")
             return False
 
         print(f"FetchInfo: Fetching info for {Task['Url']}")
@@ -77,8 +136,6 @@ class TaskManager:
             self.Update(Key,
                 Title=Info["Title"],
                 Author=Info["Author"],
-                Duration=Info["Duration"],
-                Description=Info["Description"],
                 Thumbnail=Info["Thumbnail"],
                 VideoId=Info["VideoId"]
             )
@@ -86,105 +143,48 @@ class TaskManager:
         print("FetchInfo: Failed to get info")
         return False
 
-    def GetTaskDir(self, Key: str) -> Path:
-        """获取任务的工作目录"""
-        TaskDir = GetVideoDir() / Key
-        TaskDir.mkdir(parents=True, exist_ok=True)
-        return TaskDir
-
-    def WriteInfoFile(self, Key: str):
-        """写入任务信息文件到任务目录"""
-        Task = self.Get(Key)
-        if not Task:
-            return
-
-        TaskDir = self.GetTaskDir(Key)
-        InfoPath = TaskDir / "info.txt"
-
-        StatusText = {
-            "queued": "Queued",
-            "downloading": "Downloading",
-            "recognizing": "Recognizing",
-            "translating": "Translating",
-            "dubbing": "Dubbing",
-            "merging": "Merging",
-            "ready": "Ready",
-            "published": "Published",
-        }.get(Task["Status"], Task["Status"])
-
-        Lines = [
-            f"Title: {Task.get('Title', '')}",
-            f"Author: {Task.get('Author', '')}",
-            f"URL: {Task['Url']}",
-            f"Status: {StatusText}",
-            f"Progress: {Task['Progress']}%",
-        ]
-
-        if Task.get("Duration", 0) > 0:
-            Minutes = Task["Duration"] // 60
-            Seconds = Task["Duration"] % 60
-            Lines.append(f"Duration: {Minutes}:{Seconds:02d}")
-
-        if Task.get("PublishUrl"):
-            Lines.append(f"Publish URL: {Task['PublishUrl']}")
-
-        if Task.get("Description"):
-            Lines.append(f"\n--- Description ---\n{Task['Description']}")
-
-        with open(InfoPath, "w", encoding="utf-8") as F:
-            F.write("\n".join(Lines))
-
     def Download(self, Key: str, ProgressCallback=None) -> bool:
         """下载视频"""
         Task = self.Get(Key)
         if not Task:
             return False
 
-        self.Update(Key, Status=TaskStatus.Downloading, Progress=0, Error="")
         TaskDir = self.GetTaskDir(Key)
+        VideoPath = TaskDir / "video.mp4"
+
+        # 已存在则跳过
+        if VideoPath.exists():
+            return True
 
         def OnProgress(Percent, Status, Speed):
-            self.Update(Key, Progress=Percent)
+            self.Tasks[Key]["Progress"] = Percent
             if ProgressCallback:
                 ProgressCallback(Percent, Status, Speed)
 
-        VideoPath = DownloadVideo(Task["Url"], TaskDir, OnProgress)
-        if VideoPath:
-            self.Update(Key, VideoPath=str(VideoPath), Progress=100)
+        Result = DownloadVideo(Task["Url"], TaskDir, OnProgress)
+        if Result:
+            # 重命名为 video.mp4
+            if Result.name != "video.mp4":
+                Result.rename(VideoPath)
             return True
         else:
-            self.Update(Key, Status=TaskStatus.Queued, Error="Download failed")
+            self.Update(Key, Error="Download failed")
             return False
-
-    def Archive(self, Key: str, PublishUrl: str):
-        """归档任务：设为已发布，删除缓存文件"""
-        Task = self.Get(Key)
-        if not Task:
-            return
-
-        if Task.get("OutputPath"):
-            OutputPath = Path(Task["OutputPath"])
-            if OutputPath.exists():
-                if OutputPath.is_dir():
-                    shutil.rmtree(OutputPath)
-                else:
-                    OutputPath.unlink()
-
-        self.Update(Key,
-            Status=TaskStatus.Published,
-            PublishUrl=PublishUrl,
-            OutputPath=""
-        )
 
     def Update(self, Key: str, **Fields):
         """更新任务字段"""
-        if Key in self.Tasks:
-            for K, V in Fields.items():
-                if K == "Status" and isinstance(V, TaskStatus):
-                    V = V.value
-                self.Tasks[Key][K] = V
-            self.Save()
-            self.WriteInfoFile(Key)
+        if Key not in self.Tasks:
+            return
+        NeedSave = False
+        for K, V in Fields.items():
+            if K == "Status" and isinstance(V, TaskStatus):
+                V = V.value
+            self.Tasks[Key][K] = V
+            # 持久化字段需要保存
+            if K in ["Title", "Author", "Thumbnail", "VideoId", "PublishUrl", "Error", "Url"]:
+                NeedSave = True
+        if NeedSave:
+            self.SaveTask(Key)
 
     def Get(self, Key: str) -> dict | None:
         """获取任务"""
@@ -197,20 +197,20 @@ class TaskManager:
                 return (Key, Task)
         return None
 
-    def GetByStatus(self, Status: TaskStatus) -> list[tuple[str, dict]]:
-        """获取指定状态的任务"""
-        Result = [(K, V) for K, V in self.Tasks.items() if V["Status"] == Status.value]
-        Result.sort(key=lambda X: int(X[0]), reverse=True)
-        return Result
-
     def GetAll(self) -> list[tuple[str, dict]]:
-        """获取所有任务"""
+        """获取所有任务（按时间倒序）"""
         Result = list(self.Tasks.items())
         Result.sort(key=lambda X: int(X[0]), reverse=True)
         return Result
 
     def Delete(self, Key: str):
-        """删除任务"""
+        """删除任务（包括文件夹）"""
         if Key in self.Tasks:
             del self.Tasks[Key]
-            self.Save()
+        TaskDir = GetTasksDir() / Key
+        if TaskDir.exists():
+            shutil.rmtree(TaskDir)
+
+    def Archive(self, Key: str, PublishUrl: str):
+        """归档任务：设为已发布"""
+        self.Update(Key, PublishUrl=PublishUrl)

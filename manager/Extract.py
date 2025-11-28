@@ -1,4 +1,4 @@
-# 音频处理模块
+# 音频提取模块
 import subprocess
 from pathlib import Path
 

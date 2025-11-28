@@ -15,13 +15,16 @@ def GetDataDir() -> Path:
     return DataDir
 
 
-def GetVideoDir() -> Path:
-    """获取视频存储目录"""
-    VideoDir = GetDataDir() / "Videos"
-    VideoDir.mkdir(parents=True, exist_ok=True)
-    return VideoDir
+def GetTasksDir() -> Path:
+    """获取任务存储目录"""
+    TasksDir = GetDataDir() / "Tasks"
+    TasksDir.mkdir(parents=True, exist_ok=True)
+    return TasksDir
 
 
-def GetTasksPath() -> Path:
-    """获取任务文件路径"""
-    return GetDataDir() / "Tasks.json"
+def ListTaskDirs() -> list[Path]:
+    """遍历所有任务目录，按时间戳倒序"""
+    TasksDir = GetTasksDir()
+    Dirs = [D for D in TasksDir.iterdir() if D.is_dir() and D.name.isdigit()]
+    Dirs.sort(key=lambda D: int(D.name), reverse=True)
+    return Dirs
