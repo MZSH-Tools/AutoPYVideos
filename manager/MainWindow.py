@@ -4,7 +4,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFrame, QSplitter, QProgressBar, QApplication, QTextEdit
+    QLabel, QFrame, QSplitter, QApplication, QTextEdit
 )
 from PySide6.QtCore import Signal, Qt, QThread, QObject
 from PySide6.QtGui import QCloseEvent, QColor
@@ -174,10 +174,16 @@ class MainWindow(QMainWindow):
         # 详情内容（普通正文样式）
         LabelStyle = "font-size: 13px; color: #333; padding: 3px 10px;"
 
-        # 状态（第一行）
+        # 状态行（第一行：左侧状态文字 + 右侧进度数字）
+        StatusLayout = QHBoxLayout()
         self.DetailStatus = QLabel("")
         self.DetailStatus.setStyleSheet("font-size: 13px; padding: 3px 10px;")
-        DetailLayout.addWidget(self.DetailStatus)
+        StatusLayout.addWidget(self.DetailStatus)
+        StatusLayout.addStretch()
+        self.DetailProgressLabel = QLabel("")
+        self.DetailProgressLabel.setStyleSheet("font-size: 13px; padding: 3px 10px; color: #0088ff;")
+        StatusLayout.addWidget(self.DetailProgressLabel)
+        DetailLayout.addLayout(StatusLayout)
 
         self.DetailAuthor = QLabel("")
         self.DetailAuthor.setStyleSheet(LabelStyle)
@@ -208,14 +214,6 @@ class MainWindow(QMainWindow):
         self.DetailDuration.setStyleSheet(LabelStyle)
         DetailLayout.addWidget(self.DetailDuration)
 
-        self.DetailProgress = QProgressBar()
-        self.DetailProgress.setVisible(False)
-        DetailLayout.addWidget(self.DetailProgress)
-
-        self.DetailSpeed = QLabel("")
-        self.DetailSpeed.setStyleSheet("color: #0088ff; padding: 3px 10px;")
-        self.DetailSpeed.setVisible(False)
-        DetailLayout.addWidget(self.DetailSpeed)
 
         self.DetailError = QLabel("")
         self.DetailError.setStyleSheet("color: #cc0000; padding: 3px 10px;")
@@ -357,9 +355,8 @@ class MainWindow(QMainWindow):
         """处理进度更新"""
         self.RefreshList()
         if self.CurKey == Key:
-            self.DetailProgress.setValue(Percent)
             self.CurSpeed = Speed
-            self.UpdateSpeedDisplay()
+            self.UpdateProgressDisplay(Percent, Stage)
 
     def OnStageChanged(self, Key: str, Stage: str):
         """处理阶段变化"""
@@ -379,19 +376,20 @@ class MainWindow(QMainWindow):
         # 尝试处理下一个任务
         self.TryStartProcessing()
 
-    def UpdateSpeedDisplay(self):
-        """更新速度显示"""
-        if self.CurSpeed > 0:
+    def UpdateProgressDisplay(self, Percent: int, Stage: str):
+        """更新进度显示（状态行右侧）"""
+        if Stage == "downloading" and self.CurSpeed > 0:
+            # 下载时显示：进度 + 速度
             if self.CurSpeed >= 1024 * 1024:
                 SpeedStr = f"{self.CurSpeed / 1024 / 1024:.1f} MB/s"
             elif self.CurSpeed >= 1024:
                 SpeedStr = f"{self.CurSpeed / 1024:.1f} KB/s"
             else:
                 SpeedStr = f"{self.CurSpeed:.0f} B/s"
-            self.DetailSpeed.setText(f"速度: {SpeedStr}")
-            self.DetailSpeed.setVisible(True)
+            self.DetailProgressLabel.setText(f"{Percent}% ({SpeedStr})")
         else:
-            self.DetailSpeed.setVisible(False)
+            # 其他阶段只显示进度
+            self.DetailProgressLabel.setText(f"{Percent}%")
 
     def RefreshList(self):
         """刷新任务列表（保持选中状态）"""
@@ -503,18 +501,12 @@ class MainWindow(QMainWindow):
         self.DetailStatus.setText(f"状态: {StatusText}")
         self.DetailStatus.setStyleSheet(f"font-size: 13px; padding: 3px 10px; color: {Color};")
 
-        # 进度条和速度
+        # 进度显示（状态行右侧）
         ProcessingStatuses = ["downloading", "recognizing", "translating", "dubbing", "merging"]
-        if Status in ProcessingStatuses:
-            self.DetailProgress.setVisible(True)
-            self.DetailProgress.setValue(Progress)
-            if Status == "downloading":
-                self.UpdateSpeedDisplay()
-            else:
-                self.DetailSpeed.setVisible(False)
+        if Status in ProcessingStatuses and Progress > 0:
+            self.UpdateProgressDisplay(Progress, Status)
         else:
-            self.DetailProgress.setVisible(False)
-            self.DetailSpeed.setVisible(False)
+            self.DetailProgressLabel.setText("")
 
         # 发布链接（可编辑）
         self.PublishUrlEdit.setText(PublishUrl)
@@ -558,12 +550,11 @@ class MainWindow(QMainWindow):
         self.CurSpeed = 0
         self.CurUrl = ""
         self.DetailStatus.setText("无任务")
+        self.DetailProgressLabel.setText("")
         self.DetailAuthor.setText("")
         self.DetailTitle.setText("")
         self.DetailUrl.setText("")
         self.DetailDuration.setText("")
-        self.DetailProgress.setVisible(False)
-        self.DetailSpeed.setVisible(False)
         self.CopyUrlBtn.setVisible(False)
         self.PublishUrlEdit.setText("")
         self.DetailError.setVisible(False)
