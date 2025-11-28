@@ -12,21 +12,35 @@ from PySide6.QtGui import QCloseEvent, QColor
 from Cache import TaskManager, TaskStatus
 
 
+# 全局 Debug 标志
+DebugMode = False
+
+
 class LogSignal(QObject):
     """日志信号，用于跨线程发送日志"""
-    Message = Signal(str)
+    Message = Signal(str, bool)  # Msg, IsDebug
 
 LogEmitter = LogSignal()
 
 
+def Log(Msg: str):
+    """普通日志"""
+    LogEmitter.Message.emit(Msg, False)
+
+
+def LogDebug(Msg: str):
+    """调试日志"""
+    LogEmitter.Message.emit(Msg, True)
+
+
 class LogWriter:
-    """重定向stdout到GUI"""
+    """重定向stdout到GUI（作为调试日志）"""
     def __init__(self):
         self.Terminal = sys.__stdout__
 
     def write(self, Msg):
         if Msg.strip():
-            LogEmitter.Message.emit(Msg.strip())
+            LogEmitter.Message.emit(Msg.strip(), True)
 
     def flush(self):
         pass
@@ -36,10 +50,11 @@ class FetchInfoThread(QThread):
     """后台获取视频信息的线程"""
     Finished = Signal(str, bool)  # Key, Success
 
-    def __init__(self, TaskMgr: TaskManager, Key: str):
+    def __init__(self, Key: str, Url: str):
         super().__init__()
-        self.TaskMgr = TaskMgr
         self.Key = Key
+        self.Url = Url
+        self.TaskMgr = TaskManager()  # 独立实例
 
     def run(self):
         Success = self.TaskMgr.FetchInfo(self.Key)
@@ -156,59 +171,75 @@ class MainWindow(QMainWindow):
         DetailLayout = QVBoxLayout(DetailPanel)
         Splitter.addWidget(DetailPanel)
 
-        # 详情内容
-        self.DetailTitle = QLabel("选择一个任务")
-        self.DetailTitle.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
+        # 详情内容（普通正文样式）
+        LabelStyle = "font-size: 13px; color: #333; padding: 3px 10px;"
+
+        # 状态（第一行）
+        self.DetailStatus = QLabel("")
+        self.DetailStatus.setStyleSheet("font-size: 13px; padding: 3px 10px;")
+        DetailLayout.addWidget(self.DetailStatus)
+
+        self.DetailAuthor = QLabel("")
+        self.DetailAuthor.setStyleSheet(LabelStyle)
+        self.DetailAuthor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        DetailLayout.addWidget(self.DetailAuthor)
+
+        self.DetailTitle = QLabel("")
+        self.DetailTitle.setStyleSheet(LabelStyle)
         self.DetailTitle.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.DetailTitle.setWordWrap(True)
         DetailLayout.addWidget(self.DetailTitle)
 
-        self.DetailAuthor = QLabel("")
-        self.DetailAuthor.setStyleSheet("font-size: 14px; color: #444; padding: 0 10px;")
-        self.DetailAuthor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        DetailLayout.addWidget(self.DetailAuthor)
-
+        # 原链接 + 复制按钮
+        UrlLayout = QHBoxLayout()
         self.DetailUrl = QLabel("")
-        self.DetailUrl.setStyleSheet("color: #666; padding: 5px 10px;")
+        self.DetailUrl.setStyleSheet(LabelStyle)
         self.DetailUrl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.DetailUrl.setWordWrap(True)
-        DetailLayout.addWidget(self.DetailUrl)
+        UrlLayout.addWidget(self.DetailUrl, 1)
+        self.CopyUrlBtn = QPushButton("复制")
+        self.CopyUrlBtn.setFixedWidth(50)
+        self.CopyUrlBtn.clicked.connect(self.OnCopyUrl)
+        self.CopyUrlBtn.setVisible(False)
+        UrlLayout.addWidget(self.CopyUrlBtn)
+        DetailLayout.addLayout(UrlLayout)
 
-        self.DetailStatus = QLabel("")
-        self.DetailStatus.setStyleSheet("font-size: 14px; padding: 10px;")
-        DetailLayout.addWidget(self.DetailStatus)
+        self.DetailDuration = QLabel("")
+        self.DetailDuration.setStyleSheet(LabelStyle)
+        DetailLayout.addWidget(self.DetailDuration)
 
         self.DetailProgress = QProgressBar()
         self.DetailProgress.setVisible(False)
         DetailLayout.addWidget(self.DetailProgress)
 
         self.DetailSpeed = QLabel("")
-        self.DetailSpeed.setStyleSheet("color: #0088ff; padding: 5px 10px;")
+        self.DetailSpeed.setStyleSheet("color: #0088ff; padding: 3px 10px;")
         self.DetailSpeed.setVisible(False)
         DetailLayout.addWidget(self.DetailSpeed)
 
-        self.DetailDuration = QLabel("")
-        self.DetailDuration.setStyleSheet("color: #888; padding: 5px 10px;")
-        DetailLayout.addWidget(self.DetailDuration)
-
-        self.DetailTime = QLabel("")
-        self.DetailTime.setStyleSheet("color: #888; padding: 5px 10px;")
-        DetailLayout.addWidget(self.DetailTime)
-
-        self.DetailPublishUrl = QLabel("")
-        self.DetailPublishUrl.setStyleSheet("color: #0066cc; padding: 5px 10px;")
-        self.DetailPublishUrl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.DetailPublishUrl.setWordWrap(True)
-        self.DetailPublishUrl.setVisible(False)
-        DetailLayout.addWidget(self.DetailPublishUrl)
-
         self.DetailError = QLabel("")
-        self.DetailError.setStyleSheet("color: #cc0000; padding: 10px;")
+        self.DetailError.setStyleSheet("color: #cc0000; padding: 3px 10px;")
         self.DetailError.setWordWrap(True)
         self.DetailError.setVisible(False)
         DetailLayout.addWidget(self.DetailError)
 
         DetailLayout.addStretch()
+
+        # 发布链接（可编辑，贴在底部）
+        PublishLayout = QHBoxLayout()
+        PublishLabel = QLabel("发布链接:")
+        PublishLabel.setStyleSheet(LabelStyle)
+        PublishLayout.addWidget(PublishLabel)
+        self.PublishUrlEdit = QLineEdit()
+        self.PublishUrlEdit.setPlaceholderText("输入发布后的链接...")
+        self.PublishUrlEdit.editingFinished.connect(self.OnPublishUrlChanged)
+        PublishLayout.addWidget(self.PublishUrlEdit)
+        DetailLayout.addLayout(PublishLayout)
+
+        # 打开文件夹按钮（最下面）
+        self.OpenFolderBtn = QPushButton("打开文件夹")
+        self.OpenFolderBtn.clicked.connect(self.OnOpenFolder)
+        DetailLayout.addWidget(self.OpenFolderBtn)
 
         Splitter.setSizes([250, 650])
 
@@ -226,10 +257,14 @@ class MainWindow(QMainWindow):
         # 存储后台线程
         self.FetchThreads = []
 
-    def AppendLog(self, Msg: str):
+    def AppendLog(self, Msg: str, IsDebug: bool = False):
         """添加日志"""
+        # Debug 日志只在 Debug 模式下显示
+        if IsDebug and not DebugMode:
+            return
         TimeStr = datetime.now().strftime("%H:%M:%S")
-        self.LogText.append(f"[{TimeStr}] {Msg}")
+        Prefix = "[DEBUG] " if IsDebug else ""
+        self.LogText.append(f"[{TimeStr}] {Prefix}{Msg}")
         # 滚动到底部
         self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
 
@@ -244,40 +279,41 @@ class MainWindow(QMainWindow):
             Key, Task = Found
             self.RefreshList()
             self.SelectTask(Key)
+            Log(f"Task already exists: {Url[:50]}...")
         else:
             Key = self.TaskMgr.Add(Url)
             self.RefreshList()
             self.SelectTask(Key)
+            Log(f"Task added, fetching info...")
             # 后台获取视频信息
-            self.StartFetchInfo(Key)
+            self.StartFetchInfo(Key, Url)
 
         self.UrlInput.clear()
 
-    def StartFetchInfo(self, Key: str):
+    def StartFetchInfo(self, Key: str, Url: str):
         """启动后台获取视频信息"""
-        Thread = FetchInfoThread(self.TaskMgr, Key)
+        Thread = FetchInfoThread(Key, Url)
         Thread.Finished.connect(self.OnFetchInfoFinished)
         self.FetchThreads.append(Thread)
         Thread.start()
 
     def OnFetchInfoFinished(self, Key: str, Success: bool):
         """视频信息获取完成"""
-        print(f"FetchInfo finished: Key={Key}, Success={Success}")
         # 重新加载任务数据
         self.TaskMgr.Load()
         Task = self.TaskMgr.Get(Key)
-        if Task:
-            print(f"Task Title: {Task.get('Title')}, Author: {Task.get('Author')}")
-        # 刷新列表和详情
+        if Success and Task:
+            Log(f"Info fetched: {Task.get('Title', '')[:30]}")
+        else:
+            Log(f"Failed to fetch info for task {Key}")
+        # 刷新列表和详情（保持选中）
         self.RefreshList()
-        if self.CurKey == Key:
-            if Task:
-                self.UpdateDetail(Key, Task)
-        # 尝试启动自动处理
-        self.TryStartProcessing()
+        if self.CurKey == Key and Task:
+            self.UpdateDetail(Key, Task)
+        # 注意：信息获取完成后不自动开始下载，等用户确认
 
     def SelectProcessingTask(self):
-        """选中正在处理的任务，如果没有则选中第一个等待的任务"""
+        """选中正在处理的任务，如果没有则选中第一个任务"""
         ProcessingStatuses = [
             TaskStatus.Downloading.value,
             TaskStatus.Recognizing.value,
@@ -285,16 +321,15 @@ class MainWindow(QMainWindow):
             TaskStatus.Dubbing.value,
             TaskStatus.Merging.value,
         ]
+        AllTasks = self.TaskMgr.GetAll()
         # 先找正在处理的
-        for Key, Task in self.TaskMgr.GetAll():
+        for Key, Task in AllTasks:
             if Task["Status"] in ProcessingStatuses:
                 self.SelectTask(Key)
                 return
-        # 再找等待开始的
-        for Key, Task in self.TaskMgr.GetAll():
-            if Task["Status"] == TaskStatus.Queued.value:
-                self.SelectTask(Key)
-                return
+        # 没有正在处理的，选中第一个
+        if AllTasks:
+            self.SelectTask(AllTasks[0][0])
 
     def TryStartProcessing(self):
         """尝试启动下一个任务的处理（如果当前没有在处理）"""
@@ -359,23 +394,44 @@ class MainWindow(QMainWindow):
             self.DetailSpeed.setVisible(False)
 
     def RefreshList(self):
-        """刷新任务列表"""
+        """刷新任务列表（保持选中状态）"""
+        # 记住当前选中的 Key
+        SelectedKey = self.CurKey
+        # 阻止信号避免触发 OnTaskSelected
+        self.TaskList.blockSignals(True)
         self.TaskList.clear()
         Tasks = self.TaskMgr.GetAll()
         for Key, Task in Tasks:
             Item = self.CreateListItem(Key, Task)
             self.TaskList.addItem(Item)
+        # 恢复选中
+        if SelectedKey:
+            for I in range(self.TaskList.count()):
+                Item = self.TaskList.item(I)
+                if Item.data(Qt.ItemDataRole.UserRole) == SelectedKey:
+                    self.TaskList.setCurrentItem(Item)
+                    break
+        self.TaskList.blockSignals(False)
 
     def CreateListItem(self, Key: str, Task: dict) -> QListWidgetItem:
         """创建列表项"""
         Timestamp = int(Key) / 1000
         TimeStr = datetime.fromtimestamp(Timestamp).strftime("%Y-%m-%d %H:%M")
-        Title = Task.get("Title") or "加载中..."
 
         Status = Task["Status"]
+        StatusText = {
+            "queued": "等待中",
+            "downloading": "下载中...",
+            "recognizing": "识别中...",
+            "translating": "翻译中...",
+            "dubbing": "配音中...",
+            "merging": "合成中...",
+            "ready": "待发布",
+            "published": "已发布",
+        }.get(Status, Status)
         Color = StatusColors.get(Status, "#666666")
 
-        DisplayText = f"{TimeStr}\n{Title[:20]}..." if len(Title) > 20 else f"{TimeStr}\n{Title}"
+        DisplayText = f"{TimeStr}\n{StatusText}"
         Item = QListWidgetItem(DisplayText)
         Item.setData(Qt.ItemDataRole.UserRole, Key)
         Item.setForeground(QColor(Color))
@@ -415,11 +471,8 @@ class MainWindow(QMainWindow):
         PublishUrl = Task.get("PublishUrl", "")
         Error = Task.get("Error", "")
 
-        Timestamp = int(Key) / 1000
-        TimeStr = datetime.fromtimestamp(Timestamp).strftime("%Y-%m-%d %H:%M:%S")
-
         StatusText = {
-            "queued": "等待开始",
+            "queued": "等待中",
             "downloading": "下载中...",
             "recognizing": "识别中...",
             "translating": "翻译中...",
@@ -431,34 +484,30 @@ class MainWindow(QMainWindow):
 
         Color = StatusColors.get(Status, "#666666")
 
-        # 标题和作者
-        self.DetailTitle.setText(Title)
-        self.DetailAuthor.setText(f"作者: {Author}" if Author else "")
-
-        # URL
+        # 原作者、原标题、原链接
+        self.DetailAuthor.setText(f"原作者: {Author}" if Author else "")
+        self.DetailTitle.setText(f"原标题: {Title}")
         self.DetailUrl.setText(f"原链接: {Url}")
+        self.CurUrl = Url  # 保存用于复制
+        self.CopyUrlBtn.setVisible(True)
 
-        # 状态
-        self.DetailStatus.setText(StatusText)
-        self.DetailStatus.setStyleSheet(f"font-size: 14px; padding: 10px; color: {Color};")
-
-        # 时长
+        # 视频时长
         if Duration > 0:
             Minutes = Duration // 60
             Seconds = Duration % 60
-            self.DetailDuration.setText(f"时长: {Minutes}:{Seconds:02d}")
+            self.DetailDuration.setText(f"视频时长: {Minutes}:{Seconds:02d}")
         else:
             self.DetailDuration.setText("")
 
-        # 添加时间
-        self.DetailTime.setText(f"添加时间: {TimeStr}")
+        # 状态
+        self.DetailStatus.setText(f"状态: {StatusText}")
+        self.DetailStatus.setStyleSheet(f"font-size: 13px; padding: 3px 10px; color: {Color};")
 
-        # 进度条和速度（下载、识别、翻译、配音、合成时显示）
+        # 进度条和速度
         ProcessingStatuses = ["downloading", "recognizing", "translating", "dubbing", "merging"]
         if Status in ProcessingStatuses:
             self.DetailProgress.setVisible(True)
             self.DetailProgress.setValue(Progress)
-            # 速度只在下载时显示
             if Status == "downloading":
                 self.UpdateSpeedDisplay()
             else:
@@ -467,13 +516,8 @@ class MainWindow(QMainWindow):
             self.DetailProgress.setVisible(False)
             self.DetailSpeed.setVisible(False)
 
-        # 发布链接
-        if PublishUrl:
-            self.DetailPublishUrl.setText(f"发布链接: {PublishUrl}")
-            self.DetailPublishUrl.setVisible(True)
-        else:
-            self.DetailPublishUrl.setText("发布链接: 暂无")
-            self.DetailPublishUrl.setVisible(True)
+        # 发布链接（可编辑）
+        self.PublishUrlEdit.setText(PublishUrl)
 
         # 错误信息
         if Error:
@@ -482,19 +526,46 @@ class MainWindow(QMainWindow):
         else:
             self.DetailError.setVisible(False)
 
+    def OnCopyUrl(self):
+        """复制原链接到剪贴板"""
+        if hasattr(self, "CurUrl") and self.CurUrl:
+            QApplication.clipboard().setText(self.CurUrl)
+            Log("链接已复制")
+
+    def OnPublishUrlChanged(self):
+        """发布链接编辑完成"""
+        if not self.CurKey:
+            return
+        NewUrl = self.PublishUrlEdit.text().strip()
+        self.TaskMgr.Update(self.CurKey, PublishUrl=NewUrl)
+
+    def OnOpenFolder(self):
+        """打开任务文件夹"""
+        if not self.CurKey:
+            return
+        import os
+        import subprocess
+        TaskDir = self.TaskMgr.GetTaskDir(self.CurKey)
+        if TaskDir.exists():
+            if os.name == "nt":
+                subprocess.run(["explorer", str(TaskDir)])
+            else:
+                subprocess.run(["xdg-open", str(TaskDir)])
+
     def ClearDetail(self):
         """清空详情面板"""
         self.CurKey = None
         self.CurSpeed = 0
-        self.DetailTitle.setText("选择一个任务")
+        self.CurUrl = ""
+        self.DetailStatus.setText("无任务")
         self.DetailAuthor.setText("")
+        self.DetailTitle.setText("")
         self.DetailUrl.setText("")
-        self.DetailStatus.setText("")
         self.DetailDuration.setText("")
-        self.DetailTime.setText("")
         self.DetailProgress.setVisible(False)
         self.DetailSpeed.setVisible(False)
-        self.DetailPublishUrl.setVisible(False)
+        self.CopyUrlBtn.setVisible(False)
+        self.PublishUrlEdit.setText("")
         self.DetailError.setVisible(False)
 
     def closeEvent(self, Event: QCloseEvent):
