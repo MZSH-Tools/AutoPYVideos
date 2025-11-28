@@ -12,7 +12,9 @@ from PySide6.QtGui import QCloseEvent, QColor
 from pathlib import Path
 from Task import TaskManager, TaskStatus
 from Extract import ExtractAudio
+import Recognize
 from Recognize import RecognizeAudio
+import Translate
 from Translate import TranslateSrt
 
 
@@ -37,6 +39,11 @@ def LogDebug(Msg: str):
     LogEmitter.Message.emit(Msg, True)
 
 
+# 设置模块日志函数
+Recognize.SetLogFunc(Log)
+Translate.SetLogFunc(Log)
+
+
 class LogWriter:
     """重定向stdout到GUI（作为调试日志）"""
     def __init__(self):
@@ -54,11 +61,11 @@ class FetchInfoThread(QThread):
     """后台获取视频信息的线程"""
     Finished = Signal(str, bool)  # Key, Success
 
-    def __init__(self, Key: str, Url: str):
+    def __init__(self, TaskMgr: TaskManager, Key: str, Url: str):
         super().__init__()
+        self.TaskMgr = TaskMgr
         self.Key = Key
         self.Url = Url
-        self.TaskMgr = TaskManager()  # 独立实例
 
     def run(self):
         Success = self.TaskMgr.FetchInfo(self.Key)
@@ -77,86 +84,112 @@ class ProcessThread(QThread):
         self.Key = Key
 
     def run(self):
+        """全自动流水线：根据文件存在决定从哪个阶段开始"""
         Task = self.TaskMgr.Get(self.Key)
         if not Task:
             self.Finished.emit(self.Key, False)
             return
 
+        TaskDir = self.TaskMgr.GetTaskDir(self.Key)
+        VideoPath = TaskDir / "video.mp4"
+        AudioPath = TaskDir / "audio.wav"
+        EnSrtPath = TaskDir / "en.srt"
+        ZhSrtPath = TaskDir / "zh-cn.srt"
+
         try:
-            # 阶段 1: 下载
-            if Task["Status"] == TaskStatus.Queued.value:
+            # 阶段 1: 下载视频
+            if not VideoPath.exists():
                 self.StageChanged.emit(self.Key, "downloading")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Downloading, Progress=0)
 
                 def OnDownloadProgress(Percent, Status, Speed):
                     self.Progress.emit(self.Key, Percent, "downloading", Speed or 0)
 
-                Success = self.TaskMgr.Download(self.Key, OnDownloadProgress)
-                if not Success:
+                try:
+                    Success = self.TaskMgr.Download(self.Key, OnDownloadProgress)
+                    if not Success:
+                        Log(f"Download failed: {Task['Url']}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                        self.Finished.emit(self.Key, False)
+                        return
+                except Exception as E:
+                    import traceback
+                    Log(f"Download error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
                     return
 
             # 阶段 2: 提取音频
-            Task = self.TaskMgr.Get(self.Key)
-            if Task["Status"] in [TaskStatus.Downloading.value, TaskStatus.Extracting.value]:
+            if not AudioPath.exists():
                 self.StageChanged.emit(self.Key, "extracting")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Extracting, Progress=0)
 
-                TaskDir = self.TaskMgr.GetTaskDir(self.Key)
-                VideoPath = TaskDir / "video.mp4"
-                AudioPath = TaskDir / "audio.wav"
-
-                if not AudioPath.exists():
-                    AudioPath = ExtractAudio(VideoPath, AudioPath)
-                    if not AudioPath:
-                        self.TaskMgr.Update(self.Key, Error="Audio extraction failed")
+                try:
+                    Result = ExtractAudio(VideoPath, AudioPath)
+                    if not Result:
+                        Log(f"Audio extraction failed: {VideoPath}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
+                except Exception as E:
+                    import traceback
+                    Log(f"Extraction error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                    self.Finished.emit(self.Key, False)
+                    return
 
                 self.TaskMgr.Update(self.Key, Progress=100)
 
             # 阶段 3: 语音识别
-            Task = self.TaskMgr.Get(self.Key)
-            if Task["Status"] in [TaskStatus.Extracting.value, TaskStatus.Recognizing.value]:
+            if not EnSrtPath.exists():
                 self.StageChanged.emit(self.Key, "recognizing")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Recognizing, Progress=0)
-
-                TaskDir = self.TaskMgr.GetTaskDir(self.Key)
-                SrtPath = TaskDir / "en.srt"
 
                 def OnRecognizeProgress(Percent, Text):
                     self.Progress.emit(self.Key, Percent, "recognizing", 0)
 
-                if not SrtPath.exists():
-                    AudioPath = TaskDir / "audio.wav"
-                    SrtPath = RecognizeAudio(AudioPath, SrtPath, Language="en",
-                                             ProgressCallback=OnRecognizeProgress)
-                    if not SrtPath:
-                        self.TaskMgr.Update(self.Key, Error="Recognition failed")
+                try:
+                    Result = RecognizeAudio(AudioPath, EnSrtPath, Language="en",
+                                            ProgressCallback=OnRecognizeProgress)
+                    if not Result:
+                        Log(f"Recognition failed: {AudioPath}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
+                except Exception as E:
+                    import traceback
+                    Log(f"Recognition error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                    self.Finished.emit(self.Key, False)
+                    return
 
             # 阶段 4: 翻译（英文 → 中文）
-            Task = self.TaskMgr.Get(self.Key)
-            if Task["Status"] in [TaskStatus.Recognizing.value, TaskStatus.Translating.value]:
+            if not ZhSrtPath.exists():
                 self.StageChanged.emit(self.Key, "translating")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Translating, Progress=0)
-
-                TaskDir = self.TaskMgr.GetTaskDir(self.Key)
-                SrcSrt = TaskDir / "en.srt"
-                DstSrt = TaskDir / "zh-cn.srt"
 
                 def OnTranslateProgress(Percent, Text):
                     self.Progress.emit(self.Key, Percent, "translating", 0)
 
-                if not DstSrt.exists():
-                    DstSrt = TranslateSrt(SrcSrt, DstSrt,
+                try:
+                    Result = TranslateSrt(EnSrtPath, ZhSrtPath,
                                           SourceLang="en", TargetLang="zh-CN",
                                           ProgressCallback=OnTranslateProgress)
-                    if not DstSrt:
-                        self.TaskMgr.Update(self.Key, Error="Translation failed")
+                    if not Result:
+                        Log(f"Translation failed: {EnSrtPath}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
+                except Exception as E:
+                    import traceback
+                    Log(f"Translation error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                    self.Finished.emit(self.Key, False)
+                    return
 
             # 阶段 5-6: 配音、合成（待实现）
             # 暂时直接标记为待发布
@@ -164,7 +197,10 @@ class ProcessThread(QThread):
             self.Finished.emit(self.Key, True)
 
         except Exception as E:
-            self.TaskMgr.Update(self.Key, Error=str(E))
+            import traceback
+            Log(f"Process error: {E}")
+            Log(traceback.format_exc())
+            self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
             self.Finished.emit(self.Key, False)
 
 
@@ -179,6 +215,7 @@ StatusColors = {
     "merging": "#ff8800",     # 橙色 - 合成中
     "ready": "#00aa00",       # 绿色 - 待发布
     "published": "#666666",   # 深灰 - 已发布
+    "failed": "#cc0000",      # 红色 - 失败
 }
 
 
@@ -194,6 +231,7 @@ class MainWindow(QMainWindow):
         self.CurSpeed = 0  # 当前下载速度 bytes/s
         self.ProcessThread = None  # 当前处理线程（同时只处理一个）
         self.SetupUI()
+        Log("Manager started")
         self.RefreshList()
         self.SelectProcessingTask()
         self.TryStartProcessing()
@@ -286,12 +324,6 @@ class MainWindow(QMainWindow):
         DetailLayout.addLayout(UrlLayout)
 
         DetailLayout.addSpacing(10)
-
-        self.DetailError = QLabel("")
-        self.DetailError.setStyleSheet("color: #cc0000; padding: 3px 10px;")
-        self.DetailError.setWordWrap(True)
-        self.DetailError.setVisible(False)
-        DetailLayout.addWidget(self.DetailError)
 
         DetailLayout.addStretch()
 
@@ -398,15 +430,13 @@ class MainWindow(QMainWindow):
 
     def StartFetchInfo(self, Key: str, Url: str):
         """启动后台获取视频信息"""
-        Thread = FetchInfoThread(Key, Url)
+        Thread = FetchInfoThread(self.TaskMgr, Key, Url)
         Thread.Finished.connect(self.OnFetchInfoFinished)
         self.FetchThreads.append(Thread)
         Thread.start()
 
     def OnFetchInfoFinished(self, Key: str, Success: bool):
         """视频信息获取完成"""
-        # 重新加载任务数据
-        self.TaskMgr.Load()
         Task = self.TaskMgr.Get(Key)
         if Success and Task:
             Log(f"Info fetched: {Task.get('Title', '')[:30]}")
@@ -416,7 +446,8 @@ class MainWindow(QMainWindow):
         self.RefreshList()
         if self.CurKey == Key and Task:
             self.UpdateDetail(Key, Task)
-        # 注意：信息获取完成后不自动开始下载，等用户确认
+        # 尝试启动自动处理
+        self.TryStartProcessing()
 
     def SelectProcessingTask(self):
         """选中正在处理的任务，如果没有则选中第一个任务"""
@@ -444,11 +475,24 @@ class MainWindow(QMainWindow):
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
 
-        # 找到第一个等待处理的任务
+        # 需要处理的状态（等待中 或 中间状态需要继续）
+        PendingStatuses = [
+            TaskStatus.Queued.value,
+            TaskStatus.Extracting.value,
+            TaskStatus.Recognizing.value,
+            TaskStatus.Translating.value,
+            TaskStatus.Dubbing.value,
+            TaskStatus.Merging.value,
+        ]
+
+        # 找到第一个需要处理的任务
         for Key, Task in self.TaskMgr.GetAll():
-            if Task["Status"] == TaskStatus.Queued.value:
+            if Task["Status"] in PendingStatuses:
                 self.StartProcessing(Key)
                 return
+
+        # 没有任务需要处理，清空流水线显示
+        self.ClearPipelineDisplay()
 
     def StartProcessing(self, Key: str):
         """启动任务处理"""
@@ -487,12 +531,10 @@ class MainWindow(QMainWindow):
         """处理完成"""
         self.RefreshList()
         Task = self.TaskMgr.Get(Key)
-        if Task:
-            self.UpdatePipelineDisplay(Key, Task["Status"], 100)
         # 更新详情面板
         if self.CurKey == Key and Task:
             self.UpdateDetail(Key, Task)
-        # 尝试处理下一个任务
+        # 尝试处理下一个任务（会自动更新流水线显示）
         self.TryStartProcessing()
 
     def UpdatePipelineDisplay(self, Key: str, Status: str, Progress: int):
@@ -510,7 +552,7 @@ class MainWindow(QMainWindow):
         # 更新标题（显示任务时间）
         if Key:
             Timestamp = int(Key) / 1000
-            TimeStr = datetime.fromtimestamp(Timestamp).strftime("%m-%d %H:%M")
+            TimeStr = datetime.fromtimestamp(Timestamp).strftime("%Y-%m-%d %H:%M")
             self.PipelineTitle.setText(f"当前任务: {TimeStr}")
         else:
             self.PipelineTitle.setText("当前任务: 无")
@@ -541,6 +583,23 @@ class MainWindow(QMainWindow):
                 Label.setStyleSheet("font-size: 11px; color: #0088ff; padding: 1px 5px; font-weight: bold;")
             else:
                 # 等待中
+                Label.setText(f"○ {Name}")
+                Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
+
+    def ClearPipelineDisplay(self):
+        """清空流水线显示（无任务时）"""
+        self.PipelineTitle.setText("当前任务: 无")
+        StageNames = {
+            "downloading": "下载视频",
+            "extracting": "提取音频",
+            "recognizing": "语音识别",
+            "translating": "字幕翻译",
+            "dubbing": "语音合成",
+            "merging": "视频合成",
+        }
+        for Stage, Name in StageNames.items():
+            Label = self.StageLabels.get(Stage)
+            if Label:
                 Label.setText(f"○ {Name}")
                 Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
 
@@ -595,6 +654,7 @@ class MainWindow(QMainWindow):
             "merging": "合成中...",
             "ready": "待发布",
             "published": "已发布",
+            "failed": "失败",
         }.get(Status, Status)
         Color = StatusColors.get(Status, "#666666")
 
@@ -635,7 +695,6 @@ class MainWindow(QMainWindow):
         Status = Task["Status"]
         Progress = Task["Progress"]
         PublishUrl = Task.get("PublishUrl", "")
-        Error = Task.get("Error", "")
 
         StatusText = {
             "queued": "等待中",
@@ -647,6 +706,7 @@ class MainWindow(QMainWindow):
             "merging": "合成中...",
             "ready": "待发布",
             "published": "已发布",
+            "failed": "失败",
         }.get(Status, Status)
 
         Color = StatusColors.get(Status, "#666666")
@@ -671,13 +731,6 @@ class MainWindow(QMainWindow):
 
         # 发布链接（可编辑）
         self.PublishUrlEdit.setText(PublishUrl)
-
-        # 错误信息
-        if Error:
-            self.DetailError.setText(f"错误: {Error}")
-            self.DetailError.setVisible(True)
-        else:
-            self.DetailError.setVisible(False)
 
     def OnCopyUrl(self):
         """复制原链接到剪贴板"""
@@ -717,7 +770,6 @@ class MainWindow(QMainWindow):
         self.DetailUrl.setText("")
         self.CopyUrlBtn.setVisible(False)
         self.PublishUrlEdit.setText("")
-        self.DetailError.setVisible(False)
 
     def closeEvent(self, Event: QCloseEvent):
         """关闭窗口时隐藏而非退出"""

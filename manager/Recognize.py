@@ -1,6 +1,21 @@
 # 语音识别模块（Faster-Whisper）
 from pathlib import Path
 
+# 日志回调（由 MainWindow 设置）
+LogFunc = None
+
+def SetLogFunc(Func):
+    """设置日志函数"""
+    global LogFunc
+    LogFunc = Func
+
+def Log(Msg: str):
+    """输出日志"""
+    if LogFunc:
+        LogFunc(Msg)
+    else:
+        print(Msg)
+
 
 def FormatSrtTime(Seconds: float) -> str:
     """将秒数转换为 SRT 时间格式 HH:MM:SS,mmm"""
@@ -25,7 +40,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
     返回生成的 srt 文件路径
     """
     if not AudioPath.exists():
-        print(f"RecognizeAudio: Audio not found: {AudioPath}")
+        Log(f"RecognizeAudio: Audio not found: {AudioPath}")
         return None
 
     if OutputSrt is None:
@@ -33,12 +48,13 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
 
     # 已存在则跳过
     if OutputSrt.exists():
-        print(f"RecognizeAudio: SRT already exists: {OutputSrt}")
+        Log(f"RecognizeAudio: SRT already exists: {OutputSrt}")
         return OutputSrt
 
     try:
         from faster_whisper import WhisperModel
 
+        Log(f"RecognizeAudio: Loading model {Model}...")
         if ProgressCallback:
             ProgressCallback(0, "Loading model...")
 
@@ -87,7 +103,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
         return OutputSrt
 
     except Exception as E:
-        print(f"RecognizeAudio error: {E}")
         import traceback
-        traceback.print_exc()
+        Log(f"RecognizeAudio error: {E}")
+        Log(traceback.format_exc())
         return None

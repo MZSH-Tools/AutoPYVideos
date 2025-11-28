@@ -20,6 +20,7 @@ class TaskStatus(Enum):
     Merging = "merging"
     Ready = "ready"
     Published = "published"
+    Failed = "failed"
 
 
 # 文件名 → 状态映射（根据文件存在推断状态）
@@ -181,7 +182,7 @@ class TaskManager:
                 V = V.value
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
-            if K in ["Title", "Author", "Thumbnail", "VideoId", "PublishUrl", "Error", "Url"]:
+            if K in ["Title", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url"]:
                 NeedSave = True
         if NeedSave:
             self.SaveTask(Key)

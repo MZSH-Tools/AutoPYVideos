@@ -4,6 +4,21 @@ import time
 import requests
 from pathlib import Path
 
+# 日志回调（由 MainWindow 设置）
+LogFunc = None
+
+def SetLogFunc(Func):
+    """设置日志函数"""
+    global LogFunc
+    LogFunc = Func
+
+def Log(Msg: str):
+    """输出日志"""
+    if LogFunc:
+        LogFunc(Msg)
+    else:
+        print(Msg)
+
 
 def ParseSrt(SrtPath: Path) -> list[dict]:
     """
@@ -83,7 +98,7 @@ def GoogleTranslate(Text: str, SourceLang: str = "zh-CN", TargetLang: str = "en"
             return Match.group(1).strip()
         return None
     except Exception as E:
-        print(f"GoogleTranslate error: {E}")
+        Log(f"GoogleTranslate error: {E}")
         return None
 
 
@@ -100,7 +115,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
     返回生成的 srt 文件路径
     """
     if not InputSrt.exists():
-        print(f"TranslateSrt: Input not found: {InputSrt}")
+        Log(f"TranslateSrt: Input not found: {InputSrt}")
         return None
 
     if OutputSrt is None:
@@ -108,13 +123,13 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
 
     # 已存在则跳过
     if OutputSrt.exists():
-        print(f"TranslateSrt: Output already exists: {OutputSrt}")
+        Log(f"TranslateSrt: Output already exists: {OutputSrt}")
         return OutputSrt
 
     # 解析字幕
     Subtitles = ParseSrt(InputSrt)
     if not Subtitles:
-        print(f"TranslateSrt: No subtitles found in {InputSrt}")
+        Log(f"TranslateSrt: No subtitles found in {InputSrt}")
         return None
 
     Total = len(Subtitles)
