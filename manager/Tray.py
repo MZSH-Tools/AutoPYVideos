@@ -1,7 +1,9 @@
 # 系统托盘模块
+import sys
+import os
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QProcess
 
 from MainWindow import MainWindow
 
@@ -39,13 +41,17 @@ class TrayIcon(QObject):
 
         Menu = QMenu()
 
-        OpenAction = QAction("Open Manager", Menu)
+        OpenAction = QAction("打开管理界面", Menu)
         OpenAction.triggered.connect(self.ShowMainWindow)
         Menu.addAction(OpenAction)
 
+        RestartAction = QAction("重启服务", Menu)
+        RestartAction.triggered.connect(self.Restart)
+        Menu.addAction(RestartAction)
+
         Menu.addSeparator()
 
-        QuitAction = QAction("Exit", Menu)
+        QuitAction = QAction("退出", Menu)
         QuitAction.triggered.connect(self.Quit)
         Menu.addAction(QuitAction)
 
@@ -74,6 +80,15 @@ class TrayIcon(QObject):
         """托盘图标被激活"""
         if Reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.ShowMainWindow()
+
+    def Restart(self):
+        """重启程序"""
+        if self.MainWin:
+            self.MainWin.close()
+        self.TrayIcon.hide()
+        # 启动新进程
+        QProcess.startDetached(sys.executable, sys.argv, os.getcwd())
+        self.App.quit()
 
     def Quit(self):
         """退出程序"""

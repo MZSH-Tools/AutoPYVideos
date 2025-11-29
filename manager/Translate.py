@@ -2,6 +2,9 @@
 import re
 from pathlib import Path
 
+# 代理设置（与 Download.py 保持一致）
+PROXY = "http://127.0.0.1:7890"
+
 # 日志回调（由 MainWindow 设置）
 LogFunc = None
 
@@ -92,6 +95,13 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
     """
     from videotrans import translator
     from videotrans.translator import GOOGLE_INDEX
+    from videotrans.configure import config
+
+    # 设置代理（Google 翻译需要）
+    config.proxy = PROXY
+
+    # 保存原状态
+    OrigBoxTrans = config.box_trans
 
     if not InputSrt.exists():
         Log(f"TranslateSrt: Input not found: {InputSrt}")
@@ -116,25 +126,42 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         ProgressCallback(10, "Translating...")
 
     try:
+        # 设置状态以绕过 videotrans 的状态检查
+        config.box_trans = 'ing'
+
         # 转换为 videotrans 格式：[{"text": "...", "line": 1}, ...]
         TextList = [{"text": Sub["text"], "line": Sub["line"]} for Sub in Subtitles]
 
         # 调用 videotrans 翻译接口（默认 Google，失败自动回退 Microsoft）
-        Result = translator.run(
-            translate_type=GOOGLE_INDEX,
-            text_list=TextList,
-            source_code=SourceLang,
-            target_code=TargetLang
-        )
-
-        if not Result:
-            Log(f"TranslateSrt: Translation failed")
+        Log(f"TranslateSrt: Using proxy {config.proxy}")
+        try:
+            Result = translator.run(
+                translate_type=GOOGLE_INDEX,
+                text_list=TextList,
+                source_code=SourceLang,
+                target_code=TargetLang
+            )
+        except Exception as TransErr:
+            Log(f"TranslateSrt: translator.run exception: {TransErr}")
+            import traceback
+            Log(traceback.format_exc())
             return None
 
+        if not Result:
+            Log(f"TranslateSrt: Translation returned empty result")
+            return None
+
+        Log(f"TranslateSrt: Got {len(Result)} results")
+
         # 合并翻译结果
+        # Result 格式可能是 [str, ...] 或 [{"text": str}, ...]
         Translated = []
         for I, Sub in enumerate(Subtitles):
-            TransText = Result[I] if I < len(Result) else Sub["text"]
+            if I < len(Result):
+                Item = Result[I]
+                TransText = Item["text"] if isinstance(Item, dict) else str(Item)
+            else:
+                TransText = Sub["text"]
             Translated.append({
                 "line": Sub["line"],
                 "start": Sub["start"],
@@ -156,3 +183,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         Log(f"TranslateSrt error: {E}")
         Log(traceback.format_exc())
         return None
+
+    finally:
+        # 恢复原状态
+        config.box_trans = OrigBoxTrans
