@@ -16,6 +16,10 @@ import Recognize
 from Recognize import RecognizeAudio
 import Translate
 from Translate import TranslateSrt
+import Dubbing
+from Dubbing import GenerateDubbing
+import Merge
+from Merge import MergeVideo
 
 
 # 全局 Debug 标志
@@ -42,6 +46,8 @@ def LogDebug(Msg: str):
 # 设置模块日志函数
 Recognize.SetLogFunc(Log)
 Translate.SetLogFunc(Log)
+Dubbing.SetLogFunc(Log)
+Merge.SetLogFunc(Log)
 
 
 class LogWriter:
@@ -95,6 +101,8 @@ class ProcessThread(QThread):
         AudioPath = TaskDir / "audio.wav"
         EnSrtPath = TaskDir / "en.srt"
         ZhSrtPath = TaskDir / "zh-cn.srt"
+        ZhAudioPath = TaskDir / "zh-cn.wav"
+        OutputPath = TaskDir / "output.mp4"
 
         try:
             # 阶段 1: 下载视频
@@ -191,9 +199,57 @@ class ProcessThread(QThread):
                     self.Finished.emit(self.Key, False)
                     return
 
-            # 阶段 5-6: 配音、合成（待实现）
-            # 暂时直接标记为待发布
+            # 阶段 5: 配音（中文 TTS）
+            if not ZhAudioPath.exists():
+                self.StageChanged.emit(self.Key, "dubbing")
+                self.TaskMgr.Update(self.Key, Status=TaskStatus.Dubbing, Progress=0)
+
+                def OnDubbingProgress(Percent, Text):
+                    self.Progress.emit(self.Key, Percent, "dubbing", 0)
+
+                try:
+                    Result = GenerateDubbing(ZhSrtPath, ZhAudioPath,
+                                             ProgressCallback=OnDubbingProgress)
+                    if not Result:
+                        Log(f"Dubbing failed: {ZhSrtPath}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                        self.Finished.emit(self.Key, False)
+                        return
+                except Exception as E:
+                    import traceback
+                    Log(f"Dubbing error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                    self.Finished.emit(self.Key, False)
+                    return
+
+            # 阶段 6: 合成（音视频合并）
+            if not OutputPath.exists():
+                self.StageChanged.emit(self.Key, "merging")
+                self.TaskMgr.Update(self.Key, Status=TaskStatus.Merging, Progress=0)
+
+                def OnMergeProgress(Percent, Text):
+                    self.Progress.emit(self.Key, Percent, "merging", 0)
+
+                try:
+                    Result = MergeVideo(VideoPath, ZhAudioPath, ZhSrtPath, OutputPath,
+                                        ProgressCallback=OnMergeProgress)
+                    if not Result:
+                        Log(f"Merge failed: {VideoPath}")
+                        self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                        self.Finished.emit(self.Key, False)
+                        return
+                except Exception as E:
+                    import traceback
+                    Log(f"Merge error: {E}")
+                    Log(traceback.format_exc())
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
+                    self.Finished.emit(self.Key, False)
+                    return
+
+            # 全部完成，标记为待发布
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Ready, Progress=100)
+            Log(f"Task completed: {self.Key}")
             self.Finished.emit(self.Key, True)
 
         except Exception as E:
