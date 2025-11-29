@@ -61,13 +61,13 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
 
 
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
-                    Voice: str = "晓晓(Female/CN)", VoiceAutorate: bool = True,
+                    Voice: str = "晓晨 多语言(Female/CN)", VoiceAutorate: bool = True,
                     ProgressCallback=None) -> Path | None:
     """
     使用 videotrans 的 tts.run 接口根据字幕生成配音音频，并使用 SpeedRate 对齐
     SrtPath: 输入字幕路径
     OutputPath: 输出音频路径，默认为同目录下 zh-cn.wav
-    Voice: edge-tts 声音显示名称（如 晓晓(Female/CN)）
+    Voice: edge-tts 声音显示名称（如 晓晨 多语言(Female/CN)）
     VoiceAutorate: 是否启用配音自动加速对齐（默认 True）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的音频文件路径
@@ -102,7 +102,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     VoiceId = tools.get_edge_rolelist(Voice, "zh-cn")
     if not VoiceId:
         Log(f"GenerateDubbing: Voice '{Voice}' not found, using default")
-        VoiceId = "zh-CN-XiaoxiaoNeural"
+        VoiceId = "zh-CN-XiaochenMultilingualNeural"  # 晓晨 多语言
     Log(f"GenerateDubbing: Voice ID = {VoiceId}")
 
     # 创建缓存目录

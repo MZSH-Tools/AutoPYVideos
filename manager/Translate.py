@@ -79,6 +79,7 @@ def WriteSrt(Subtitles: list[dict], OutputPath: Path):
 
 def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
                  SourceLang: str = "en", TargetLang: str = "zh-cn",
+                 TranslateType: int = None,
                  ProgressCallback=None) -> Path | None:
     """
     翻译 SRT 字幕文件
@@ -87,12 +88,17 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
     OutputSrt: 输出字幕路径，默认为同目录下 {TargetLang}.srt
     SourceLang: 源语言代码（如 en, zh-cn）
     TargetLang: 目标语言代码（如 zh-cn, en）
+    TranslateType: 翻译引擎类型（默认 GOOGLE_INDEX）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的 srt 文件路径
     """
     from videotrans import translator
     from videotrans.translator import GOOGLE_INDEX
     from videotrans.configure import config
+
+    # 默认使用 Google 翻译
+    if TranslateType is None:
+        TranslateType = GOOGLE_INDEX
 
     # 保存原状态
     OrigBoxTrans = config.box_trans
@@ -116,6 +122,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         return None
 
     Log(f"TranslateSrt: Translating {len(Subtitles)} subtitles ({SourceLang} -> {TargetLang})...")
+    Log(f"TranslateSrt: Using translate_type={TranslateType}, proxy={config.proxy}")
     if ProgressCallback:
         ProgressCallback(10, "Translating...")
 
@@ -126,11 +133,10 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         # 转换为 videotrans 格式：[{"text": "...", "line": 1}, ...]
         TextList = [{"text": Sub["text"], "line": Sub["line"]} for Sub in Subtitles]
 
-        # 调用 videotrans 翻译接口（默认 Google，失败自动回退 Microsoft）
-        Log(f"TranslateSrt: Using proxy {config.proxy}")
+        # 调用 videotrans 翻译接口
         try:
             Result = translator.run(
-                translate_type=GOOGLE_INDEX,
+                translate_type=TranslateType,
                 text_list=TextList,
                 source_code=SourceLang,
                 target_code=TargetLang

@@ -184,7 +184,7 @@ class ProcessThread(QThread):
 
                 try:
                     Result = TranslateSrt(EnSrtPath, ZhSrtPath,
-                                          SourceLang="en", TargetLang="zh-CN",
+                                          SourceLang="en", TargetLang="zh-cn",
                                           ProgressCallback=OnTranslateProgress)
                     if not Result:
                         Log(f"Translation failed: {EnSrtPath}")
