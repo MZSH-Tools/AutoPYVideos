@@ -61,8 +61,13 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
     Proxy = GetProxy()
     Options = {
         "outtmpl": OutputTemplate,
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        # 优先下载带音频的格式，避免需要合并
+        "format": "best[ext=mp4][acodec!=none]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "merge_output_format": "mp4",
+        "postprocessors": [{
+            "key": "FFmpegVideoConvertor",
+            "preferedformat": "mp4",
+        }],
         "quiet": True,
         "no_warnings": True,
         "continuedl": True,

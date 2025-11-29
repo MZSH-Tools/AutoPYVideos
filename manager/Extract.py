@@ -23,6 +23,7 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
     调用 videotrans 的 runffmpeg 接口
     """
     from videotrans.util.help_ffmpeg import runffmpeg
+    from videotrans.util import tools
 
     if not VideoPath.exists():
         Log(f"ExtractAudio: Video not found: {VideoPath}")
@@ -37,6 +38,14 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
         return OutputPath
 
     try:
+        # 先检查视频是否有音频流
+        Log(f"ExtractAudio: Checking audio stream in {VideoPath.name}...")
+        try:
+            Duration = tools.get_video_duration(str(VideoPath))
+            Log(f"ExtractAudio: Video duration = {Duration}ms")
+        except Exception as E:
+            Log(f"ExtractAudio: Failed to get video info: {E}")
+
         Log(f"ExtractAudio: Extracting audio from {VideoPath.name}...")
         # ffmpeg 提取音频：16kHz 单声道 wav（Whisper 最佳格式）
         Cmd = [
@@ -48,13 +57,17 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
             "-ac", "1",               # 单声道
             Path(OutputPath).as_posix()
         ]
-        runffmpeg(Cmd)
+        Result = runffmpeg(Cmd)
+        Log(f"ExtractAudio: ffmpeg result = {Result}")
 
         if OutputPath.exists():
-            Log(f"ExtractAudio: Done -> {OutputPath}")
+            Size = OutputPath.stat().st_size
+            Log(f"ExtractAudio: Done -> {OutputPath} ({Size} bytes)")
+            if Size < 1000:
+                Log(f"ExtractAudio: Warning - output file is very small, video may have no audio stream")
             return OutputPath
         else:
-            Log(f"ExtractAudio: Output not created")
+            Log(f"ExtractAudio: Output not created - video may have no audio stream!")
             return None
 
     except Exception as E:
