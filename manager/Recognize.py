@@ -24,7 +24,7 @@ def FormatSrtTime(Seconds: float) -> str:
     Minutes = int((Seconds % 3600) // 60)
     Secs = int(Seconds % 60)
     Millis = int((Seconds % 1) * 1000)
-    return f"{Hours:02d}:{Minutes:02d}:{Millis:03d}"
+    return f"{Hours:02d}:{Minutes:02d}:{Secs:02d},{Millis:03d}"
 
 
 def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en",
