@@ -18,6 +18,7 @@ class TaskStatus(Enum):
     Translating = "translating"
     Dubbing = "dubbing"
     Merging = "merging"
+    Paused = "paused"  # 暂停（阶段完成后暂停）
     Ready = "ready"
     Published = "published"
     Failed = "failed"

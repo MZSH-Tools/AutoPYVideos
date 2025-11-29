@@ -172,6 +172,14 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         # 使用 SpeedRate 进行音频对齐和合并
         Result = _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VoiceAutorate, ProgressCallback)
 
+        # 成功后清理缓存目录
+        if Result and CacheDir.exists():
+            try:
+                shutil.rmtree(CacheDir)
+                Log(f"GenerateDubbing: Cleaned up cache dir")
+            except Exception as CleanErr:
+                Log(f"GenerateDubbing: Failed to clean cache: {CleanErr}")
+
         if ProgressCallback:
             ProgressCallback(100, "Done")
 
@@ -336,8 +344,12 @@ def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path |
             Inputs.extend(["-i", str(WavFile)])
             FilterParts.append(f"[{I+1}]adelay={StartMs}|{StartMs}[d{I}]")
 
+        # 使用 amix 但设置 weights 避免音量衰减
+        # 静音底座权重为0，所有音频片段权重为1
+        NumInputs = len(AudioFiles) + 1
+        Weights = "0 " + " ".join("1" for _ in AudioFiles)
         MixInputs = "[0]" + "".join(f"[d{I}]" for I in range(len(AudioFiles)))
-        FilterComplex = ";".join(FilterParts) + f";{MixInputs}amix=inputs={len(AudioFiles)+1}:duration=longest:normalize=0[out]"
+        FilterComplex = ";".join(FilterParts) + f";{MixInputs}amix=inputs={NumInputs}:duration=longest:weights={Weights}:normalize=0[out]"
 
         Cmd = ["-y"] + Inputs + [
             "-filter_complex", FilterComplex,

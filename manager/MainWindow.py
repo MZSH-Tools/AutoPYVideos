@@ -28,19 +28,41 @@ DebugMode = False
 
 class LogSignal(QObject):
     """日志信号，用于跨线程发送日志"""
-    Message = Signal(str, bool)  # Msg, IsDebug
+    Message = Signal(str, str, bool)  # Key, Msg, IsDebug
 
 LogEmitter = LogSignal()
 
+# 当前处理任务的Key（由ProcessThread设置）
+CurrentProcessingKey = None
+
+# 暂停状态（暂停后当前阶段会完成，但不会进入下一阶段）
+IsPaused = False
+
+# 暂停状态变化信号
+class PauseSignal(QObject):
+    Changed = Signal(bool)  # IsPaused
+PauseEmitter = PauseSignal()
+
+
+def SetPaused(Paused: bool):
+    """设置暂停状态"""
+    global IsPaused
+    IsPaused = Paused
+    PauseEmitter.Changed.emit(Paused)
+    if Paused:
+        Log("Processing paused - will stop after current stage")
+    else:
+        Log("Processing resumed")
+
 
 def Log(Msg: str):
-    """普通日志"""
-    LogEmitter.Message.emit(Msg, False)
+    """普通日志（使用当前处理任务的Key）"""
+    LogEmitter.Message.emit(CurrentProcessingKey or "", Msg, False)
 
 
 def LogDebug(Msg: str):
     """调试日志"""
-    LogEmitter.Message.emit(Msg, True)
+    LogEmitter.Message.emit("", Msg, True)
 
 
 # 设置模块日志函数
@@ -91,6 +113,16 @@ class ProcessThread(QThread):
 
     def run(self):
         """全自动流水线：根据文件存在决定从哪个阶段开始"""
+        global CurrentProcessingKey
+        CurrentProcessingKey = self.Key
+
+        try:
+            self._DoRun()
+        finally:
+            CurrentProcessingKey = None
+
+    def _DoRun(self):
+        """实际执行处理逻辑"""
         Task = self.TaskMgr.Get(self.Key)
         if not Task:
             self.Finished.emit(self.Key, False)
@@ -108,6 +140,11 @@ class ProcessThread(QThread):
         try:
             # 阶段 1: 下载视频
             if not VideoPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before downloading")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "downloading")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Downloading, Progress=0)
 
@@ -131,6 +168,11 @@ class ProcessThread(QThread):
 
             # 阶段 2: 提取音频
             if not AudioPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before extracting")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "extracting")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Extracting, Progress=0)
 
@@ -153,6 +195,11 @@ class ProcessThread(QThread):
 
             # 阶段 3: 语音识别
             if not EnSrtPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before recognizing")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "recognizing")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Recognizing, Progress=0)
 
@@ -177,6 +224,11 @@ class ProcessThread(QThread):
 
             # 阶段 4: 翻译（英文 → 中文）
             if not ZhSrtPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before translating")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "translating")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Translating, Progress=0)
 
@@ -208,6 +260,11 @@ class ProcessThread(QThread):
 
             # 阶段 5: 配音（中文 TTS）
             if not ZhAudioPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before dubbing")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "dubbing")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Dubbing, Progress=0)
 
@@ -232,6 +289,11 @@ class ProcessThread(QThread):
 
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
+                if IsPaused:
+                    Log(f"Task paused before merging")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
+                    self.Finished.emit(self.Key, False)
+                    return
                 self.StageChanged.emit(self.Key, "merging")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Merging, Progress=0)
 
@@ -278,6 +340,7 @@ StatusColors = {
     "translating": "#00BCD4", # 青色 - 翻译中
     "dubbing": "#E91E63",     # 粉色 - 配音中
     "merging": "#795548",     # 棕色 - 合成中
+    "paused": "#FFC107",      # 黄色 - 已暂停
     "ready": "#4CAF50",       # 绿色 - 待发布
     "published": "#9E9E9E",   # 浅灰 - 已发布
     "failed": "#F44336",      # 红色 - 失败
@@ -296,6 +359,8 @@ class MainWindow(QMainWindow):
         self.CurSpeed = 0  # 当前下载速度 bytes/s
         self.ProcessThread = None  # 当前处理线程（同时只处理一个）
         self.SetupUI()
+        # 监听暂停状态变化
+        PauseEmitter.Changed.connect(self.OnPauseChanged)
         Log("Manager started")
         self.RefreshList()
         self.SelectProcessingTask()
@@ -460,16 +525,46 @@ class MainWindow(QMainWindow):
         # 存储后台线程
         self.FetchThreads = []
 
-    def AppendLog(self, Msg: str, IsDebug: bool = False):
-        """添加日志"""
+    def AppendLog(self, Key: str, Msg: str, IsDebug: bool = False):
+        """添加日志（Key为任务Key，空表示全局日志）"""
         # Debug 日志只在 Debug 模式下显示
         if IsDebug and not DebugMode:
             return
         TimeStr = datetime.now().strftime("%H:%M:%S")
         Prefix = "[DEBUG] " if IsDebug else ""
-        self.LogText.append(f"[{TimeStr}] {Prefix}{Msg}")
-        # 滚动到底部
-        self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
+        LogLine = f"[{TimeStr}] {Prefix}{Msg}"
+
+        # 保存到任务日志文件（非Debug且有Key时）
+        if Key and not IsDebug:
+            self.SaveTaskLog(Key, LogLine)
+
+        # 如果当前选中的任务就是这个Key，或者是全局日志，则显示
+        if not Key or Key == self.CurKey:
+            self.LogText.append(LogLine)
+            self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
+
+    def SaveTaskLog(self, Key: str, LogLine: str):
+        """保存日志到任务目录"""
+        TaskDir = self.TaskMgr.GetTaskDir(Key)
+        LogPath = TaskDir / "log.txt"
+        try:
+            with open(LogPath, "a", encoding="utf-8") as F:
+                F.write(LogLine + "\n")
+        except:
+            pass
+
+    def LoadTaskLog(self, Key: str):
+        """加载任务日志到日志面板"""
+        self.LogText.clear()
+        TaskDir = self.TaskMgr.GetTaskDir(Key)
+        LogPath = TaskDir / "log.txt"
+        if LogPath.exists():
+            try:
+                Content = LogPath.read_text(encoding="utf-8")
+                self.LogText.setPlainText(Content.rstrip())
+                self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
+            except:
+                pass
 
     def OnSearch(self):
         """搜索/添加链接"""
@@ -540,11 +635,15 @@ class MainWindow(QMainWindow):
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
 
-        # 找到第一个等待中的任务（按时间正序，先处理早的）
+        # 如果暂停中，不启动新任务
+        if IsPaused:
+            return
+
+        # 找到第一个等待中或已暂停的任务（按时间正序，先处理早的）
         AllTasks = self.TaskMgr.GetAll()
         AllTasks.reverse()  # GetAll 返回时间倒序，反转为正序
         for Key, Task in AllTasks:
-            if Task["Status"] == TaskStatus.Queued.value:
+            if Task["Status"] in [TaskStatus.Queued.value, TaskStatus.Paused.value]:
                 self.StartProcessing(Key)
                 return
 
@@ -552,14 +651,12 @@ class MainWindow(QMainWindow):
         self.ClearPipelineDisplay()
 
     def StartProcessing(self, Key: str):
-        """启动任务处理"""
+        """启动任务处理（不改变用户当前选中的任务）"""
         self.ProcessThread = ProcessThread(self.TaskMgr, Key)
         self.ProcessThread.Progress.connect(self.OnProcessProgress)
         self.ProcessThread.StageChanged.connect(self.OnStageChanged)
         self.ProcessThread.Finished.connect(self.OnProcessFinished)
         self.ProcessThread.start()
-        # 选中这个任务
-        self.SelectTask(Key)
 
     def OnProcessProgress(self, Key: str, Percent: int, Stage: str, Speed: float):
         """处理进度更新"""
@@ -593,6 +690,13 @@ class MainWindow(QMainWindow):
             self.UpdateDetail(Key, Task)
         # 尝试处理下一个任务（会自动更新流水线显示）
         self.TryStartProcessing()
+
+    def OnPauseChanged(self, Paused: bool):
+        """暂停状态变化"""
+        self.RefreshList()
+        if not Paused:
+            # 恢复后尝试继续处理
+            self.TryStartProcessing()
 
     def UpdatePipelineDisplay(self, Key: str, Status: str, Progress: int):
         """更新流水线阶段显示（显示当前处理任务）"""
@@ -709,6 +813,7 @@ class MainWindow(QMainWindow):
             "translating": "翻译中...",
             "dubbing": "配音中...",
             "merging": "合成中...",
+            "paused": "已暂停",
             "ready": "待发布",
             "published": "已发布",
             "failed": "失败",
@@ -743,6 +848,8 @@ class MainWindow(QMainWindow):
             return
 
         self.UpdateDetail(Key, Task)
+        # 加载任务日志
+        self.LoadTaskLog(Key)
 
     def UpdateDetail(self, Key: str, Task: dict):
         """更新详情面板"""
@@ -761,6 +868,7 @@ class MainWindow(QMainWindow):
             "translating": "翻译中...",
             "dubbing": "配音中...",
             "merging": "合成中...",
+            "paused": "已暂停",
             "ready": "待发布",
             "published": "已发布",
             "failed": "失败",

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 from PySide6.QtCore import QObject, Signal, QProcess
 
-from MainWindow import MainWindow
+from MainWindow import MainWindow, IsPaused, SetPaused, PauseEmitter
 
 
 class TrayIcon(QObject):
@@ -45,11 +45,22 @@ class TrayIcon(QObject):
         OpenAction.triggered.connect(self.ShowMainWindow)
         Menu.addAction(OpenAction)
 
+        Menu.addSeparator()
+
+        # 暂停/恢复菜单项
+        self.PauseAction = QAction("暂停处理", Menu)
+        self.PauseAction.setCheckable(True)
+        self.PauseAction.setChecked(IsPaused)
+        self.PauseAction.triggered.connect(self.TogglePause)
+        Menu.addAction(self.PauseAction)
+        # 监听暂停状态变化，更新菜单项
+        PauseEmitter.Changed.connect(self.OnPauseChanged)
+
+        Menu.addSeparator()
+
         RestartAction = QAction("重启服务", Menu)
         RestartAction.triggered.connect(self.Restart)
         Menu.addAction(RestartAction)
-
-        Menu.addSeparator()
 
         QuitAction = QAction("退出", Menu)
         QuitAction.triggered.connect(self.Quit)
@@ -75,6 +86,14 @@ class TrayIcon(QObject):
     def OnWindowClosed(self):
         """窗口关闭时的处理"""
         pass
+
+    def TogglePause(self, Checked: bool):
+        """切换暂停状态"""
+        SetPaused(Checked)
+
+    def OnPauseChanged(self, Paused: bool):
+        """暂停状态变化时更新菜单项"""
+        self.PauseAction.setChecked(Paused)
 
     def OnTrayActivated(self, Reason):
         """托盘图标被激活"""
