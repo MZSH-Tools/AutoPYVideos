@@ -5,9 +5,6 @@ import tempfile
 import os
 from pathlib import Path
 
-# 代理设置（与 Download.py 保持一致）
-PROXY = "http://127.0.0.1:7890"
-
 # 日志回调（由 MainWindow 设置）
 LogFunc = None
 
@@ -22,21 +19,6 @@ def Log(Msg: str):
         LogFunc(Msg)
     else:
         print(Msg)
-
-
-async def TestEdgeTts(Text: str, Voice: str, OutputPath: str, Proxy: str = None) -> bool:
-    """
-    直接测试 Edge TTS 是否工作
-    返回 True 成功，False 失败
-    """
-    from edge_tts import Communicate
-    try:
-        Comm = Communicate(Text, voice=Voice, proxy=Proxy)
-        await Comm.save(OutputPath)
-        return Path(OutputPath).exists() and Path(OutputPath).stat().st_size > 0
-    except Exception as E:
-        Log(f"TestEdgeTts error: {E}")
-        return False
 
 
 def ParseSrtTime(TimeStr: str) -> float:
@@ -128,70 +110,17 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     # 创建临时目录存放音频片段
     TempDir = Path(tempfile.mkdtemp())
 
-    # 先测试 Edge TTS 连接（直接使用 edge-tts 库）
-    TestFile = TempDir / "test.mp3"
-    UseProxy = None
-    TestOk = False
+    # 获取全局代理设置
+    UseProxy = config.proxy if config.proxy else None
+    Log(f"GenerateDubbing: Using proxy from config: {UseProxy}")
 
-    # 先尝试带代理
-    Log(f"GenerateDubbing: Testing Edge-TTS with proxy {PROXY}...")
-    try:
-        async def DoTestWithProxy():
-            return await TestEdgeTts("测试", VoiceId, str(TestFile), PROXY)
-        TestOk = asyncio.run(DoTestWithProxy())
-        if TestOk:
-            UseProxy = PROXY
-            Log(f"GenerateDubbing: Test with proxy succeeded")
-    except Exception as E:
-        Log(f"GenerateDubbing: Test with proxy failed: {E}")
-        TestOk = False
-
-    # 清理测试文件
-    if TestFile.exists():
-        TestFile.unlink()
-
-    # 如果带代理失败，尝试不用代理
-    if not TestOk:
-        Log(f"GenerateDubbing: Trying without proxy...")
-        try:
-            async def DoTestNoProxy():
-                return await TestEdgeTts("测试", VoiceId, str(TestFile), None)
-            TestOk = asyncio.run(DoTestNoProxy())
-            if TestOk:
-                UseProxy = None
-                Log(f"GenerateDubbing: Test without proxy succeeded")
-        except Exception as E:
-            Log(f"GenerateDubbing: Test without proxy also failed: {E}")
-            TestOk = False
-
-    # 清理测试文件
-    if TestFile.exists():
-        TestFile.unlink()
-
-    if not TestOk:
-        Log(f"GenerateDubbing: Edge-TTS connection test failed, check network")
-        shutil.rmtree(TempDir, ignore_errors=True)
-        return None
-
-    Log(f"GenerateDubbing: Edge-TTS test OK, UseProxy={UseProxy}")
     if ProgressCallback:
         ProgressCallback(10, "Generating TTS...")
 
     # 保存原状态
     OrigBoxTts = config.box_tts
-    OrigProxy = config.proxy
 
     try:
-        # 设置代理
-        if UseProxy:
-            config.proxy = UseProxy
-            os.environ['HTTP_PROXY'] = UseProxy
-            os.environ['HTTPS_PROXY'] = UseProxy
-        else:
-            config.proxy = None
-            os.environ.pop('HTTP_PROXY', None)
-            os.environ.pop('HTTPS_PROXY', None)
-
         # 设置状态以绕过 videotrans 的状态检查
         config.box_tts = 'ing'
 
@@ -256,7 +185,6 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     finally:
         # 恢复原状态
         config.box_tts = OrigBoxTts
-        config.proxy = OrigProxy
         # 清理临时文件
         if TempDir and TempDir.exists():
             shutil.rmtree(TempDir, ignore_errors=True)

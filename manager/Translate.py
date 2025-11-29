@@ -2,9 +2,6 @@
 import re
 from pathlib import Path
 
-# 代理设置（与 Download.py 保持一致）
-PROXY = "http://127.0.0.1:7890"
-
 # 日志回调（由 MainWindow 设置）
 LogFunc = None
 
@@ -96,9 +93,6 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
     from videotrans import translator
     from videotrans.translator import GOOGLE_INDEX
     from videotrans.configure import config
-
-    # 设置代理（Google 翻译需要）
-    config.proxy = PROXY
 
     # 保存原状态
     OrigBoxTrans = config.box_trans

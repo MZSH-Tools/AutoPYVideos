@@ -2,14 +2,23 @@
 from pathlib import Path
 
 
-PROXY = "http://127.0.0.1:7890"
+def GetProxy() -> str | None:
+    """从 videotrans 全局配置获取代理"""
+    try:
+        from videotrans.configure import config
+        return config.proxy if config.proxy else None
+    except:
+        return None
 
 
 def FetchVideoInfo(Url: str) -> dict | None:
     """获取视频信息（标题、作者等）"""
     try:
         import yt_dlp
-        Options = {"quiet": True, "no_warnings": True, "proxy": PROXY}
+        Proxy = GetProxy()
+        Options = {"quiet": True, "no_warnings": True}
+        if Proxy:
+            Options["proxy"] = Proxy
         with yt_dlp.YoutubeDL(Options) as Ydl:
             Info = Ydl.extract_info(Url, download=False)
             return {
@@ -49,6 +58,7 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
     OutputDir.mkdir(parents=True, exist_ok=True)
     OutputTemplate = str(OutputDir / "%(id)s.%(ext)s")
 
+    Proxy = GetProxy()
     Options = {
         "outtmpl": OutputTemplate,
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
@@ -56,8 +66,9 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
         "quiet": True,
         "no_warnings": True,
         "continuedl": True,
-        "proxy": PROXY,
     }
+    if Proxy:
+        Options["proxy"] = Proxy
 
     if ProgressCallback:
         Options["progress_hooks"] = [DownloadProgress(ProgressCallback)]
