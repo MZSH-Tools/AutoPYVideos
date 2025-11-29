@@ -1,7 +1,6 @@
 # 配音模块（调用 videotrans 的 tts 和 SpeedRate 接口）
 import re
 import shutil
-import tempfile
 from pathlib import Path
 
 # 日志回调（由 MainWindow 设置）

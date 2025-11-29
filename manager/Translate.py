@@ -77,6 +77,76 @@ def WriteSrt(Subtitles: list[dict], OutputPath: Path):
     OutputPath.write_text("\n".join(Lines), encoding="utf-8")
 
 
+def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path = None,
+                       TargetLang: str = "zh-cn", SourceLang: str = "en") -> Path | None:
+    """
+    合并双语字幕（调用 videotrans 的 help_srt 工具函数）
+    TargetSrtPath: 目标语言字幕路径（中文，显示在上）
+    SourceSrtPath: 源语言字幕路径（英文，显示在下）
+    OutputPath: 输出路径，默认为同目录下 bilingual.srt
+    TargetLang: 目标语言代码
+    SourceLang: 源语言代码
+    返回生成的双语字幕路径
+    """
+    from videotrans.util.help_srt import get_subtitle_from_srt, textwrap
+    from videotrans.configure import config
+
+    if not TargetSrtPath.exists():
+        Log(f"MergeBilingualSrt: Target SRT not found: {TargetSrtPath}")
+        return None
+
+    if not SourceSrtPath.exists():
+        Log(f"MergeBilingualSrt: Source SRT not found: {SourceSrtPath}")
+        return None
+
+    if OutputPath is None:
+        OutputPath = TargetSrtPath.parent / "bilingual.srt"
+
+    # 已存在则跳过
+    if OutputPath.exists():
+        Log(f"MergeBilingualSrt: Output already exists: {OutputPath}")
+        return OutputPath
+
+    Log(f"MergeBilingualSrt: Loading subtitles...")
+
+    try:
+        TargetSubList = get_subtitle_from_srt(str(TargetSrtPath))
+        SourceSubList = get_subtitle_from_srt(str(SourceSrtPath))
+    except Exception as E:
+        Log(f"MergeBilingualSrt: Failed to load subtitles: {E}")
+        return None
+
+    if not TargetSubList or not SourceSubList:
+        Log(f"MergeBilingualSrt: Empty subtitles")
+        return None
+
+    Log(f"MergeBilingualSrt: Merging {len(TargetSubList)} + {len(SourceSubList)} subtitles...")
+
+    # 硬字幕时单行字符数（参考 trans_create.py:893-896）
+    MaxlenTarget = int(config.settings.get('cjk_len', 15) if TargetLang[:2] in ["zh", "ja", "jp", "ko", "yu"]
+                       else config.settings.get('other_len', 60))
+    MaxlenSource = int(config.settings.get('cjk_len', 15) if SourceLang[:2] in ["zh", "ja", "jp", "ko", "yu"]
+                       else config.settings.get('other_len', 60))
+
+    SourceLength = len(SourceSubList)
+    SrtString = ""
+
+    # 双语字幕组装（参考 trans_create.py:912-924）
+    # 目标字幕在上，源字幕在下
+    for I, Item in enumerate(TargetSubList):
+        # 硬字幕换行
+        TargetText = textwrap(Item['text'].strip(), MaxlenTarget)
+        SrtString += f"{Item['line']}\n{Item['time']}\n{TargetText}"
+        if SourceLength > 0 and I < SourceLength:
+            SourceText = textwrap(SourceSubList[I]['text'].strip(), MaxlenSource)
+            SrtString += "\n" + SourceText
+        SrtString += "\n\n"
+
+    OutputPath.write_text(SrtString.strip(), encoding="utf-8")
+    Log(f"MergeBilingualSrt: Done -> {OutputPath}")
+    return OutputPath
+
+
 def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
                  SourceLang: str = "en", TargetLang: str = "zh-cn",
                  TranslateType: int = None,

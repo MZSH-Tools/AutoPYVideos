@@ -15,7 +15,7 @@ from Extract import ExtractAudio
 import Recognize
 from Recognize import RecognizeAudio
 import Translate
-from Translate import TranslateSrt
+from Translate import TranslateSrt, MergeBilingualSrt
 import Dubbing
 from Dubbing import GenerateDubbing
 import Merge
@@ -101,6 +101,7 @@ class ProcessThread(QThread):
         AudioPath = TaskDir / "audio.wav"
         EnSrtPath = TaskDir / "en.srt"
         ZhSrtPath = TaskDir / "zh-cn.srt"
+        BilingualSrtPath = TaskDir / "bilingual.srt"
         ZhAudioPath = TaskDir / "zh-cn.wav"
         OutputPath = TaskDir / "output.mp4"
 
@@ -199,6 +200,12 @@ class ProcessThread(QThread):
                     self.Finished.emit(self.Key, False)
                     return
 
+            # 翻译完成后生成双语字幕（中文在上，英文在下）
+            if not BilingualSrtPath.exists() and ZhSrtPath.exists() and EnSrtPath.exists():
+                Log(f"Generating bilingual subtitle...")
+                MergeBilingualSrt(ZhSrtPath, EnSrtPath, BilingualSrtPath,
+                                  TargetLang="zh-cn", SourceLang="en")
+
             # 阶段 5: 配音（中文 TTS）
             if not ZhAudioPath.exists():
                 self.StageChanged.emit(self.Key, "dubbing")
@@ -232,7 +239,9 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "merging", 0)
 
                 try:
-                    Result = MergeVideo(VideoPath, ZhAudioPath, ZhSrtPath, OutputPath,
+                    # 使用双语字幕（中文在上，英文在下）
+                    SubtitlePath = BilingualSrtPath if BilingualSrtPath.exists() else ZhSrtPath
+                    Result = MergeVideo(VideoPath, ZhAudioPath, SubtitlePath, OutputPath,
                                         HardSubtitle=True, ProgressCallback=OnMergeProgress)
                     if not Result:
                         Log(f"Merge failed: {VideoPath}")
