@@ -23,20 +23,21 @@ def _get_executable_path():
         return Path(__file__).parent.parent.parent.as_posix()
 
 
+_tmpname = f'tmp{os.getpid()}'
 
 SYS_TMP = Path(tempfile.gettempdir()).as_posix()
 # 程序根目录
 ROOT_DIR = _get_executable_path()
 # 程序根下临时目录tmp
-TEMP_ROOT=f'{ROOT_DIR}/tmp'
-TEMP_DIR = f'{TEMP_ROOT}/{os.getpid()}'
+TEMP_DIR = f'{ROOT_DIR}/{_tmpname}'
 # 家目录
 HOME_DIR = ROOT_DIR + "/output"
 
-Path(TEMP_DIR).mkdir(exist_ok=True, parents=True)
-Path(f'{TEMP_ROOT}/translate_cache').mkdir(exist_ok=True, parents=True)
+Path(TEMP_DIR + '/dubbing_cache').mkdir(exist_ok=True, parents=True)
+Path(TEMP_DIR + '/translate_cache').mkdir(exist_ok=True, parents=True)
 
-
+# 家目录下的临时文件存储目录
+TEMP_HOME = TEMP_DIR
 # 日志目录 logs
 Path(f"{ROOT_DIR}/logs").mkdir(parents=True, exist_ok=True)
 
@@ -79,7 +80,6 @@ os.environ['QT_API'] = 'pyside6'
 os.environ['SOFT_NAME'] = 'pyvideotrans'
 os.environ['MODELSCOPE_CACHE'] = ROOT_DIR + "/models"
 os.environ['HF_HOME'] = ROOT_DIR + "/models"
-os.environ['HF_HUB_CACHE'] = ROOT_DIR + "/models"
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = 'true'
 os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = 'true'
 os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = "1200"
@@ -168,7 +168,7 @@ taskdone_queue = Queue(maxsize=0)
 # 执行模式 gui 或 api
 exec_mode = "gui"
 # funasr模型
-FUNASR_MODEL = ['Fun-ASR-Nano-2512','paraformer-zh', 'SenseVoiceSmall']
+FUNASR_MODEL = ['paraformer-zh', 'SenseVoiceSmall']
 
 DEEPGRAM_MODEL = [
     "nova-3",
@@ -205,10 +205,13 @@ dubbing_role = {}
 
 
 #######################################
-DEFAULT_GEMINI_MODEL = "gemini-3-pro-preview,gemini-3-flash-preview,gemini-2.5-pro,gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite"
-ELEVENLABS_CLONE = ['zh', 'en', 'fr', 'de', 'hi', 'pt', 'es', 'ja', 'ko', 'ar', 'ru', 'id', 'it', 'tr', 'pl', 'sv', 'ms', 'uk', 'cs', 'tl']
-OPENAITTS_ROLES = "No,alloy,ash,ballad,coral,echo,fable,onyx,nova,sage,shimmer,verse"
-GEMINITTS_ROLES = "No,Zephyr,Puck,Charon,Kore,Fenrir,Leda,Orus,Aoede,Callirrhoe,Autonoe,Enceladus,Iapetus,Umbriel,Algieba,Despina,Erinome,Algenib,Rasalgethi,Laomedeia,Achernar,Alnilam,Schedar,Gacrux,Pulcherrima,Achird,Zubenelgenubi,Vindemiatrix,Sadachbia,Sadaltager,Sulafat"
+DEFAULT_GEMINI_MODEL = "gemini-3-pro-preview,gemini-2.5-pro,gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite"
+ELEVENLABS_CLONE = ['zh', 'en', 'fr', 'de', 'hi', 'pt', 'es', 'ja', 'ko', 'ar', 'ru', 'id', 'it', 'tr', 'pl', 'sv',
+                    'ms', 'uk', 'cs', 'tl']
+OPENAITTS_ROLES = "alloy,ash,ballad,coral,echo,fable,onyx,nova,sage,shimmer,verse"
+QWEN_TTS_ROLES = 'Cherry,Serena,Ethan,Chelsie,Sunny,Jada,Dylan'
+QWEN3_TTS_ROLES = 'Cherry,Ethan,Nofish,Jennifer,Ryan,Katerina,Elias,Jada,Dylan,Sunny,li,Marcus,Roy,Peter,Rocky,Kiki,Eric'
+
 
 # 设置默认高级参数值
 def parse_init(update_data=None):
@@ -224,15 +227,15 @@ def parse_init(update_data=None):
         "Whisper.cpp": "",
         "faster_batch":False,
         "Whisper.cpp.models": "ggml-tiny.bin,ggml-base.bin,ggml-small.bin,ggml-medium.bin,ggml-large-v1.bin,ggml-large-v2.bin,ggml-large-v3.bin,ggml-large-v3-turbo.bin",
-        "crf": 24,
+        "crf": 23,
         "edgetts_max_concurrent_tasks":10,
         "edgetts_retry_nums":3,
         "force_lib": False,
-        "preset": "veryfast",
+        "preset": "fast",
         "ffmpeg_cmd": "",
         "aisendsrt": True,
         "dont_notify": False,
-        "video_codec": 265,
+        "video_codec": 264,
         
         "noise_separate_nums":4,
         
@@ -251,9 +254,9 @@ def parse_init(update_data=None):
         "openrouter_model": "moonshotai/kimi-k2:free,tngtech/deepseek-r1t2-chimera:free,deepseek/deepseek-r1-0528:free",
         "guiji_model": "Qwen/Qwen3-8B,Qwen/Qwen2.5-7B-Instruct,Qwen/Qwen2-7B-Instruct",
         "zijiehuoshan_model": "",
-        "model_list": "tiny,tiny.en,base,base.en,small,small.en,medium,medium.en,large-v3-turbo,large-v1,large-v2,large-v3,distil-small.en,distil-medium.en,distil-large-v2,distil-large-v3",
+        "model_list": "tiny,tiny.en,base,base.en,small,small.en,medium,medium.en,large-v1,large-v2,large-v3,large-v3-turbo,distil-small.en,distil-medium.en,distil-large-v2,distil-large-v3",
 
-
+        "remove_silence": False,
         "max_audio_speed_rate":100,
         "max_video_pts_rate":10,
         
@@ -262,10 +265,10 @@ def parse_init(update_data=None):
         
         "threshold": 0.45,
         "min_speech_duration_ms": 0,
-        "max_speech_duration_s": 5,
-        "min_silence_duration_ms": 250,
+        "max_speech_duration_s": 10,
+        "min_silence_duration_ms": 50,
         "speech_pad_ms": 0,
-
+        "rephrase": False,
         "trans_thread": 20,
         "aitrans_thread": 25,
         "translation_wait": 0,
@@ -274,7 +277,7 @@ def parse_init(update_data=None):
         "save_segment_audio": False,
         "countdown_sec": 90,
         "backaudio_volume": 0.8,
-        "loop_backaudio": True,
+        "loop_backaudio": False,
         "cuda_com_type": "default",  # int8 int8_float16 int8_float32
         "initial_prompt_zh-cn": "在每行末尾添加标点符号，在每个句子末尾添加标点符号。",
         "initial_prompt_zh-tw": "在每行末尾添加標點符號，在每個句子末尾添加標點符號。",
@@ -312,17 +315,17 @@ def parse_init(update_data=None):
         "condition_on_previous_text": False,
 
 
-        "qwentts_role": '',
-        "qwentts_models": 'qwen3-tts-flash',
+        "qwentts_role": QWEN3_TTS_ROLES,
+        "qwentts_models": 'qwen3-tts-flash,qwen-tts-latest,qwen-tts',
 
 
         "show_more_settings":False,
 
 
-        "cjk_len": 22,
-        "other_len": 46,
+        "cjk_len": 100,
+        "other_len": 100,
         "gemini_model": DEFAULT_GEMINI_MODEL,
-        "llm_chunk_size": 50,
+        "llm_chunk_size": 500,
         "llm_ai_type": "openai",
         "gemini_recogn_chunk": 50,
         "zh_hant_s": True,
@@ -415,7 +418,6 @@ def getset_params(obj=None):
         "last_opendir": os.path.expanduser("~"),
         "cuda": False,
         "line_roles": {},
-        "rephrase": 0,
         "is_separate": False,
         "remove_noise": False,
         "enable_diariz": False,
@@ -425,7 +427,7 @@ def getset_params(obj=None):
         "target_language": "zh-cn",
         "subtitle_language": "chi",
         "translate_type": 0,
-        "subtitle_type": 1,  # embed hard
+        "subtitle_type": 0,  # embed soft
         "listen_text_zh-cn": "你好啊，我亲爱的朋友，希望你的每一天都是美好愉快的！",
         "listen_text_zh-tw": "你好啊，我親愛的朋友，希望你的每一天都是美好愉快的！",
         "listen_text_en": "Hello, my dear friend. I hope your every day is beautiful and enjoyable!",
@@ -463,9 +465,7 @@ def getset_params(obj=None):
         "recogn_type": 0,  # 语音识别方式，数字代表显示顺序
         "voice_autorate": True,
         "video_autorate": False,
-        
-        "align_sub_audio":True,
-
+        "auto_fix":True,#自动校正语音转录结果字幕
         "voice_role": "No",
         "voice_rate": "0",
         "deepl_authkey": "",
@@ -505,6 +505,7 @@ def getset_params(obj=None):
         "gemini_model": "gemini-2.5-flash",
         "gemini_maxtoken":18192,
         "gemini_thinking_budget":24576,
+        "gemini_ttsrole": "Zephyr,Puck,Charon,Kore,Fenrir,Leda,Orus,Aoede,Callirrhoe,Autonoe,Enceladus,Iapetus,Umbriel,Algieba,Despina,Erinome,Algenib,Rasalgethi,Laomedeia,Achernar,Alnilam,Schedar,Gacrux,Pulcherrima,Achird,Zubenelgenubi,Vindemiatrix,Sadachbia,Sadaltager,Sulafat",
         "gemini_ttsstyle": "",
         "gemini_ttsmodel": "gemini-2.5-flash-preview-tts",
         "localllm_api": "",
@@ -536,8 +537,6 @@ def getset_params(obj=None):
         "ai302_key": "",
         "ai302_model": "",
         "ai302_model_recogn":"whisper-1",
-
-        "whipserx_api":"http://127.0.0.1:9092",
         
         "trans_api_url": "",
         "trans_secret": "",
@@ -550,6 +549,7 @@ def getset_params(obj=None):
         "openaitts_key": "",
         "openaitts_model": "tts-1",
         "openaitts_instructions": "",
+        "openaitts_role": OPENAITTS_ROLES,
         "qwentts_key": "",
         "qwentts_model": "qwen-tts-latest",
         "qwentts_role": "Chelsie",
@@ -625,10 +625,10 @@ def getset_params(obj=None):
         "stt_source_language": 0,
         "stt_recogn_type": 0,
         "stt_split_type": 0,
+        "stt_auto_fix": True,
         "stt_model_name": "",
         "stt_remove_noise": False,
         "stt_enable_diariz": False,
-        "stt_rephrase": 0,
         "stt_nums_diariz": 0,
 
         "subtitlecover_outformat": "srt",
@@ -660,6 +660,8 @@ def getset_params(obj=None):
 
 
 params = getset_params()
+settings['qwentts_role'] = QWEN3_TTS_ROLES if params.get("qwentts_model", '').startswith(
+    'qwen3-tts') else QWEN_TTS_ROLES
 # 更新 settings配置
 parse_init(settings)
 
@@ -678,6 +680,33 @@ POSTION_ASS_KV = {
 POSTION_ASS_INDEX = list(POSTION_ASS_KV.keys())
 POSTION_ASS_VK = {v: k for k, v in POSTION_ASS_KV.items()}
 
+############ F5-TTS 面板多渠道共用
+# F5-TTS 设置窗口 5个类型通用
+F5_TTS_WINFORM_NAMES = ['F5-TTS', 'Spark-TTS', 'Index-TTS', 'Dia-TTS', 'VoxCPM-TTS']
+
+
+#  F5-TTS 渠道名字获取对应url
+def get_url_byf5tts(name):
+    params = getset_params()
+    TTS_URL_LIST = {
+        F5_TTS_WINFORM_NAMES[0]: params.get('f5tts_url', ''),
+        F5_TTS_WINFORM_NAMES[1]: params.get('sparktts_url', ''),
+        F5_TTS_WINFORM_NAMES[2]: params.get('indextts_url', ''),
+        F5_TTS_WINFORM_NAMES[3]: params.get('diatts_url', ''),
+        F5_TTS_WINFORM_NAMES[4]: params.get('voxcpmtts_url', ''),
+    }
+    return TTS_URL_LIST.get(name, '')
+
+
+# F5-TTS 根据 name 获取对应的url值键名
+def get_key_byf5tts(name):
+    return {
+        F5_TTS_WINFORM_NAMES[0]: 'f5tts_url',
+        F5_TTS_WINFORM_NAMES[1]: 'sparktts_url',
+        F5_TTS_WINFORM_NAMES[2]: 'indextts_url',
+        F5_TTS_WINFORM_NAMES[3]: 'diatts_url',
+        F5_TTS_WINFORM_NAMES[4]: 'voxcpmtts_url',
+    }.get(name, 'f5tts_url')
 
 
 ## 翻译,lang_key对应 transobj中键名，kw多个位置参数，对应替换 lang_key中 {}
