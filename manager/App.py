@@ -1,8 +1,16 @@
 # 应用程序入口
+import os
 import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtCore import QObject, Signal
+
+# 优先使用 winget 安装的 ffmpeg（带 libx264）
+FFMPEG_PATH = os.path.expanduser(
+    r"~\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
+)
+if os.path.exists(FFMPEG_PATH):
+    os.environ["PATH"] = FFMPEG_PATH + os.pathsep + os.environ.get("PATH", "")
 
 from Tray import TrayIcon
 
