@@ -27,7 +27,7 @@ def FormatSrtTime(Seconds: float) -> str:
 
 
 def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh",
-                   Model: str = "large-v3", UseCuda: bool = True,
+                   Model: str = "base", UseCuda: bool = None,
                    ProgressCallback=None) -> Path | None:
     """
     使用 Faster-Whisper 识别音频生成字幕
@@ -52,17 +52,27 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
         return OutputSrt
 
     try:
+        Log(f"RecognizeAudio: Importing faster_whisper...")
         from faster_whisper import WhisperModel
 
-        Log(f"RecognizeAudio: Loading model {Model}...")
-        if ProgressCallback:
-            ProgressCallback(0, "Loading model...")
+        # 自动检测 CUDA 可用性
+        if UseCuda is None:
+            try:
+                import torch
+                UseCuda = torch.cuda.is_available()
+            except ImportError:
+                UseCuda = False
+            Log(f"RecognizeAudio: CUDA available: {UseCuda}")
 
         # 加载模型
         Device = "cuda" if UseCuda else "cpu"
         ComputeType = "float16" if UseCuda else "int8"
-        ModelObj = WhisperModel(Model, device=Device, compute_type=ComputeType)
+        Log(f"RecognizeAudio: Loading model {Model} ({Device})...")
+        if ProgressCallback:
+            ProgressCallback(5, f"Loading {Model}...")
 
+        ModelObj = WhisperModel(Model, device=Device, compute_type=ComputeType)
+        Log(f"RecognizeAudio: Model loaded, start transcribing...")
         if ProgressCallback:
             ProgressCallback(10, "Transcribing...")
 
@@ -77,6 +87,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
         # 生成 SRT
         SrtLines = []
         Index = 1
+        LastLogProgress = 0  # 上次输出日志的进度
         for Seg in Segments:
             StartTime = FormatSrtTime(Seg.start)
             EndTime = FormatSrtTime(Seg.end)
@@ -88,9 +99,15 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
                 SrtLines.append("")
                 Index += 1
 
+            # 估算进度（基于时间）
+            Progress = min(90, 10 + int(Seg.end / Info.duration * 80))
+
+            # 每 20% 输出一次日志，避免刷屏
+            if Progress >= LastLogProgress + 20:
+                Log(f"RecognizeAudio: Progress {Progress}% ({FormatSrtTime(Seg.end)} / {FormatSrtTime(Info.duration)})")
+                LastLogProgress = Progress
+
             if ProgressCallback:
-                # 估算进度（基于时间）
-                Progress = min(90, 10 + int(Seg.end / Info.duration * 80))
                 ProgressCallback(Progress, Text[:30] + "..." if len(Text) > 30 else Text)
 
         # 写入文件
