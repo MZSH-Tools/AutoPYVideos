@@ -1,8 +1,7 @@
-# 配音模块（edge-tts）
-import asyncio
+# 配音模块（调用 videotrans 的 tts 接口）
 import re
+import shutil
 import tempfile
-import subprocess
 from pathlib import Path
 
 # 日志回调（由 MainWindow 设置）
@@ -23,7 +22,6 @@ def Log(Msg: str):
 
 def ParseSrtTime(TimeStr: str) -> float:
     """将 SRT 时间格式转换为秒数"""
-    # 格式: HH:MM:SS,mmm 或 HH:MM:SS.mmm
     Match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})", TimeStr)
     if not Match:
         return 0.0
@@ -32,10 +30,7 @@ def ParseSrtTime(TimeStr: str) -> float:
 
 
 def ParseSrt(SrtPath: Path) -> list[dict]:
-    """
-    解析 SRT 字幕文件
-    返回 [{start, end, text}, ...]
-    """
+    """解析 SRT 字幕文件，返回 [{start, end, text}, ...]"""
     if not SrtPath.exists():
         return []
 
@@ -48,7 +43,6 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
         if len(Lines) < 3:
             continue
 
-        # 时间轴
         TimeMatch = re.match(
             r"(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})",
             Lines[1].strip()
@@ -56,9 +50,7 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
         if not TimeMatch:
             continue
 
-        # 字幕文本（可能多行）
         Text = " ".join(Lines[2:]).strip()
-
         Result.append({
             "start": ParseSrtTime(TimeMatch.group(1)),
             "end": ParseSrtTime(TimeMatch.group(2)),
@@ -68,152 +60,21 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
     return Result
 
 
-async def GenerateTTS(Text: str, OutputPath: Path, Voice: str = "zh-CN-XiaoxiaoNeural") -> bool:
-    """使用 edge-tts 生成单条语音"""
-    try:
-        import edge_tts
-        Communicate = edge_tts.Communicate(Text, Voice)
-        await Communicate.save(str(OutputPath))
-        return OutputPath.exists()
-    except Exception as E:
-        Log(f"TTS error: {E}")
-        return False
-
-
-def GetAudioDuration(AudioPath: Path) -> float:
-    """获取音频时长（秒）"""
-    try:
-        Result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(AudioPath)],
-            capture_output=True, text=True
-        )
-        return float(Result.stdout.strip())
-    except:
-        return 0.0
-
-
-def GenerateSilence(Duration: float, OutputPath: Path, SampleRate: int = 16000) -> bool:
-    """生成指定时长的静音音频"""
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", f"anullsrc=r={SampleRate}:cl=mono",
-             "-t", str(Duration), "-acodec", "pcm_s16le", str(OutputPath)],
-            capture_output=True
-        )
-        return OutputPath.exists()
-    except:
-        return False
-
-
-def ConcatAudios(AudioPaths: list[Path], OutputPath: Path) -> bool:
-    """合并多个音频文件"""
-    if not AudioPaths:
-        return False
-
-    try:
-        # 创建文件列表
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as F:
-            for P in AudioPaths:
-                # ffmpeg concat 需要转义路径
-                F.write(f"file '{str(P).replace(chr(92), '/')}'\n")
-            ListFile = Path(F.name)
-
-        # 合并
-        subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(ListFile),
-             "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(OutputPath)],
-            capture_output=True
-        )
-
-        ListFile.unlink()
-        return OutputPath.exists()
-    except Exception as E:
-        Log(f"Concat error: {E}")
-        return False
-
-
-async def GenerateDubbingAsync(Subtitles: list[dict], OutputPath: Path,
-                                Voice: str = "zh-CN-XiaoxiaoNeural",
-                                ProgressCallback=None) -> bool:
-    """异步生成配音音频"""
-    if not Subtitles:
-        return False
-
-    TempDir = Path(tempfile.mkdtemp())
-    AudioSegments = []
-    CurTime = 0.0
-    Total = len(Subtitles)
-
-    try:
-        for I, Sub in enumerate(Subtitles):
-            StartTime = Sub["start"]
-            EndTime = Sub["end"]
-            Text = Sub["text"]
-
-            # 填充前面的静音
-            if StartTime > CurTime:
-                SilencePath = TempDir / f"silence_{I}.wav"
-                GenerateSilence(StartTime - CurTime, SilencePath)
-                if SilencePath.exists():
-                    AudioSegments.append(SilencePath)
-
-            # 生成语音
-            TtsPath = TempDir / f"tts_{I}.mp3"
-            Success = await GenerateTTS(Text, TtsPath, Voice)
-
-            if Success:
-                # 转换为 wav
-                WavPath = TempDir / f"tts_{I}.wav"
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", str(TtsPath), "-ar", "16000", "-ac", "1",
-                     "-acodec", "pcm_s16le", str(WavPath)],
-                    capture_output=True
-                )
-                if WavPath.exists():
-                    AudioSegments.append(WavPath)
-                    # 更新当前时间
-                    Duration = GetAudioDuration(WavPath)
-                    CurTime = StartTime + Duration
-                else:
-                    CurTime = EndTime
-            else:
-                # TTS 失败，用静音代替
-                SilencePath = TempDir / f"fail_{I}.wav"
-                GenerateSilence(EndTime - StartTime, SilencePath)
-                if SilencePath.exists():
-                    AudioSegments.append(SilencePath)
-                CurTime = EndTime
-
-            # 进度回调
-            if ProgressCallback:
-                Percent = int((I + 1) * 100 / Total)
-                Preview = Text[:20] + "..." if len(Text) > 20 else Text
-                ProgressCallback(Percent, Preview)
-
-        # 合并所有音频
-        if AudioSegments:
-            ConcatAudios(AudioSegments, OutputPath)
-
-        return OutputPath.exists()
-
-    finally:
-        # 清理临时文件
-        import shutil
-        shutil.rmtree(TempDir, ignore_errors=True)
-
-
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                     Voice: str = "zh-CN-XiaoxiaoNeural",
                     ProgressCallback=None) -> Path | None:
     """
-    根据字幕生成配音音频
+    使用 videotrans 的 tts.run 接口根据字幕生成配音音频
     SrtPath: 输入字幕路径
     OutputPath: 输出音频路径，默认为同目录下 zh-cn.wav
     Voice: edge-tts 声音名称
     ProgressCallback: 进度回调 (percent, text)
     返回生成的音频文件路径
     """
+    from videotrans import tts
+    from videotrans.configure import config
+    from videotrans.util.help_ffmpeg import runffmpeg
+
     if not SrtPath.exists():
         Log(f"GenerateDubbing: SRT not found: {SrtPath}")
         return None
@@ -232,22 +93,106 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         Log(f"GenerateDubbing: No subtitles found")
         return None
 
-    Log(f"GenerateDubbing: Generating {len(Subtitles)} segments...")
+    Log(f"GenerateDubbing: Generating {len(Subtitles)} segments using Edge-TTS...")
+    if ProgressCallback:
+        ProgressCallback(10, "Generating TTS...")
 
-    # 运行异步任务
+    # 保存原状态
+    OrigBoxTts = config.box_tts
+
+    TempDir = None
     try:
-        Loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(Loop)
-        Success = Loop.run_until_complete(
-            GenerateDubbingAsync(Subtitles, OutputPath, Voice, ProgressCallback)
-        )
-        Loop.close()
+        # 设置状态以绕过 videotrans 的状态检查
+        config.box_tts = 'ing'
 
-        if Success:
+        # 创建临时目录存放音频片段
+        TempDir = Path(tempfile.mkdtemp())
+
+        # 构建 videotrans tts 格式的 queue_tts
+        # 格式: [{"text": "...", "role": "角色名", "filename": "输出路径(不含扩展名)"}, ...]
+        QueueTts = []
+        for I, Sub in enumerate(Subtitles):
+            QueueTts.append({
+                "text": Sub["text"],
+                "role": Voice,
+                "filename": str(TempDir / f"seg_{I:04d}"),
+                "start_time": int(Sub["start"] * 1000),  # 毫秒
+                "end_time": int(Sub["end"] * 1000),
+            })
+
+        # 调用 videotrans TTS 接口
+        tts.run(
+            queue_tts=QueueTts,
+            language="zh-cn",
+            tts_type=tts.EDGE_TTS
+        )
+
+        if ProgressCallback:
+            ProgressCallback(60, "Merging audio...")
+
+        # 检查生成的音频文件并合并
+        AudioFiles = []
+        for I, Item in enumerate(QueueTts):
+            WavFile = Path(Item["filename"] + ".wav")
+            if WavFile.exists():
+                AudioFiles.append((Item["start_time"], WavFile))
+
+        if not AudioFiles:
+            Log(f"GenerateDubbing: No audio files generated")
+            return None
+
+        # 按时间排序
+        AudioFiles.sort(key=lambda X: X[0])
+
+        # 使用 ffmpeg 合并音频（带时间对齐）
+        # 创建静音填充的完整音频
+        LastEndTime = Subtitles[-1]["end"]
+        SilenceFile = TempDir / "silence.wav"
+
+        # 生成总时长的静音底座
+        runffmpeg([
+            "-y", "-f", "lavfi",
+            "-i", f"anullsrc=r=16000:cl=mono",
+            "-t", str(LastEndTime + 1),
+            "-acodec", "pcm_s16le",
+            SilenceFile.as_posix()
+        ])
+
+        # 使用 amix 混合所有音频
+        if len(AudioFiles) == 1:
+            # 只有一个音频，直接复制
+            shutil.copy(AudioFiles[0][1], OutputPath)
+        else:
+            # 构建 ffmpeg filter_complex
+            Inputs = ["-i", SilenceFile.as_posix()]
+            FilterParts = ["[0]"]
+
+            for I, (StartMs, WavFile) in enumerate(AudioFiles):
+                Inputs.extend(["-i", WavFile.as_posix()])
+                DelayMs = StartMs
+                FilterParts.append(f"[{I+1}]adelay={DelayMs}|{DelayMs}[d{I}]")
+
+            # 混合所有延迟后的音频
+            MixInputs = "[0]" + "".join(f"[d{I}]" for I in range(len(AudioFiles)))
+            FilterComplex = ";".join(FilterParts[1:]) + f";{MixInputs}amix=inputs={len(AudioFiles)+1}:duration=longest[out]"
+
+            Cmd = ["-y"] + Inputs + [
+                "-filter_complex", FilterComplex,
+                "-map", "[out]",
+                "-ar", "16000", "-ac", "1",
+                "-acodec", "pcm_s16le",
+                OutputPath.as_posix()
+            ]
+            runffmpeg(Cmd)
+
+        if ProgressCallback:
+            ProgressCallback(100, "Done")
+
+        if OutputPath.exists():
             Log(f"GenerateDubbing: Done -> {OutputPath}")
             return OutputPath
         else:
-            Log(f"GenerateDubbing: Failed")
+            Log(f"GenerateDubbing: Output not created")
             return None
 
     except Exception as E:
@@ -255,3 +200,10 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         Log(f"GenerateDubbing error: {E}")
         Log(traceback.format_exc())
         return None
+
+    finally:
+        # 恢复原状态
+        config.box_tts = OrigBoxTts
+        # 清理临时文件
+        if TempDir and TempDir.exists():
+            shutil.rmtree(TempDir, ignore_errors=True)

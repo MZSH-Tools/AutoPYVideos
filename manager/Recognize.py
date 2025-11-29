@@ -1,4 +1,5 @@
-# 语音识别模块（Faster-Whisper）
+# 语音识别模块（调用 videotrans 的 recognition 接口）
+import tempfile
 from pathlib import Path
 
 # 日志回调（由 MainWindow 设置）
@@ -23,22 +24,25 @@ def FormatSrtTime(Seconds: float) -> str:
     Minutes = int((Seconds % 3600) // 60)
     Secs = int(Seconds % 60)
     Millis = int((Seconds % 1) * 1000)
-    return f"{Hours:02d}:{Minutes:02d}:{Secs:02d},{Millis:03d}"
+    return f"{Hours:02d}:{Minutes:02d}:{Millis:03d}"
 
 
-def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh",
+def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en",
                    Model: str = "base", UseCuda: bool = None,
                    ProgressCallback=None) -> Path | None:
     """
-    使用 Faster-Whisper 识别音频生成字幕
+    使用 videotrans 的 recognition.run 接口识别音频生成字幕
     AudioPath: 音频文件路径（16kHz wav）
     OutputSrt: 输出字幕路径，默认为音频同目录下 {Language}.srt
     Language: 语言代码，如 zh, en, ja
     Model: 模型名称，如 tiny, base, small, medium, large-v3
-    UseCuda: 是否使用 GPU 加速
+    UseCuda: 是否使用 GPU 加速（None 为自动检测）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的 srt 文件路径
     """
+    from videotrans import recognition
+    from videotrans.configure import config
+
     if not AudioPath.exists():
         Log(f"RecognizeAudio: Audio not found: {AudioPath}")
         return None
@@ -51,72 +55,69 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
         Log(f"RecognizeAudio: SRT already exists: {OutputSrt}")
         return OutputSrt
 
+    # 自动检测 CUDA 可用性
+    if UseCuda is None:
+        try:
+            import torch
+            UseCuda = torch.cuda.is_available()
+        except ImportError:
+            UseCuda = False
+        Log(f"RecognizeAudio: CUDA available: {UseCuda}")
+
+    Log(f"RecognizeAudio: Starting recognition ({Model}, {Language})...")
+    if ProgressCallback:
+        ProgressCallback(10, f"Loading {Model}...")
+
+    # 保存原状态
+    OrigBoxRecogn = config.box_recogn
+
     try:
-        Log(f"RecognizeAudio: Importing faster_whisper...")
-        from faster_whisper import WhisperModel
+        # 设置状态以绕过 videotrans 的状态检查
+        config.box_recogn = 'ing'
 
-        # 自动检测 CUDA 可用性
-        if UseCuda is None:
-            try:
-                import torch
-                UseCuda = torch.cuda.is_available()
-            except ImportError:
-                UseCuda = False
-            Log(f"RecognizeAudio: CUDA available: {UseCuda}")
+        # 创建临时缓存目录
+        CacheFolder = Path(tempfile.mkdtemp())
 
-        # 加载模型
-        Device = "cuda" if UseCuda else "cpu"
-        ComputeType = "float16" if UseCuda else "int8"
-        Log(f"RecognizeAudio: Loading model {Model} ({Device})...")
-        if ProgressCallback:
-            ProgressCallback(5, f"Loading {Model}...")
-
-        ModelObj = WhisperModel(Model, device=Device, compute_type=ComputeType)
-        Log(f"RecognizeAudio: Model loaded, start transcribing...")
-        if ProgressCallback:
-            ProgressCallback(10, "Transcribing...")
-
-        # 识别
-        Segments, Info = ModelObj.transcribe(
-            str(AudioPath),
-            language=Language,
-            beam_size=5,
-            word_timestamps=True
+        # 调用 videotrans 识别接口
+        Result = recognition.run(
+            recogn_type=recognition.FASTER_WHISPER,
+            audio_file=str(AudioPath),
+            cache_folder=str(CacheFolder),
+            model_name=Model,
+            detect_language=Language,
+            is_cuda=UseCuda,
+            subtitle_type=0  # 0=普通字幕
         )
 
-        # 生成 SRT
+        if not Result:
+            Log(f"RecognizeAudio: Recognition failed, no result")
+            return None
+
+        if ProgressCallback:
+            ProgressCallback(80, "Writing SRT...")
+
+        # Result 格式: [{"line": 1, "start_time": ms, "end_time": ms, "text": "..."}, ...]
+        # 转换为 SRT 格式
         SrtLines = []
-        Index = 1
-        LastLogProgress = 0  # 上次输出日志的进度
-        for Seg in Segments:
-            StartTime = FormatSrtTime(Seg.start)
-            EndTime = FormatSrtTime(Seg.end)
-            Text = Seg.text.strip()
+        for I, Item in enumerate(Result, 1):
+            StartMs = Item.get("start_time", 0)
+            EndMs = Item.get("end_time", 0)
+            Text = Item.get("text", "").strip()
             if Text:
-                SrtLines.append(f"{Index}")
+                StartTime = FormatSrtTime(StartMs / 1000)
+                EndTime = FormatSrtTime(EndMs / 1000)
+                SrtLines.append(str(I))
                 SrtLines.append(f"{StartTime} --> {EndTime}")
                 SrtLines.append(Text)
                 SrtLines.append("")
-                Index += 1
-
-            # 估算进度（基于时间）
-            Progress = min(90, 10 + int(Seg.end / Info.duration * 80))
-
-            # 每 20% 输出一次日志，避免刷屏
-            if Progress >= LastLogProgress + 20:
-                Log(f"RecognizeAudio: Progress {Progress}% ({FormatSrtTime(Seg.end)} / {FormatSrtTime(Info.duration)})")
-                LastLogProgress = Progress
-
-            if ProgressCallback:
-                ProgressCallback(Progress, Text[:30] + "..." if len(Text) > 30 else Text)
 
         # 写入文件
-        with open(OutputSrt, "w", encoding="utf-8") as F:
-            F.write("\n".join(SrtLines))
+        OutputSrt.write_text("\n".join(SrtLines), encoding="utf-8")
 
         if ProgressCallback:
             ProgressCallback(100, "Done")
 
+        Log(f"RecognizeAudio: Done -> {OutputSrt}")
         return OutputSrt
 
     except Exception as E:
@@ -124,3 +125,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "zh"
         Log(f"RecognizeAudio error: {E}")
         Log(traceback.format_exc())
         return None
+
+    finally:
+        # 恢复原状态
+        config.box_recogn = OrigBoxRecogn
