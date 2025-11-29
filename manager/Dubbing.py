@@ -60,7 +60,7 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
 
 
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
-                    Voice: str = "晓晨 多语言(Female/CN)", VoiceAutorate: bool = True,
+                    Voice: str = "zh-CN-XiaoxiaoNeural", VoiceAutorate: bool = True,
                     ProgressCallback=None) -> Path | None:
     """
     使用 videotrans 的 tts.run 接口根据字幕生成配音音频，并使用 SpeedRate 对齐
@@ -101,7 +101,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     VoiceId = tools.get_edge_rolelist(Voice, "zh-cn")
     if not VoiceId:
         Log(f"GenerateDubbing: Voice '{Voice}' not found, using default")
-        VoiceId = "zh-CN-XiaochenMultilingualNeural"  # 晓晨 多语言
+        VoiceId = "zh-CN-XiaoxiaoNeural"  # 晓晓
     Log(f"GenerateDubbing: Voice ID = {VoiceId}")
 
     # 创建缓存目录
@@ -125,12 +125,13 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 
         # 构建 videotrans tts 格式的 queue_tts
         # 注意：role 要用 VoiceId（如 zh-CN-XiaochenMultilingualNeural），不是显示名称
+        # 注意：filename 必须包含 .wav 后缀，因为 SpeedRate 直接使用这个路径加载文件
         QueueTts = []
         for I, Sub in enumerate(Subtitles):
             QueueTts.append({
                 "text": Sub["text"],
                 "role": VoiceId,  # 使用 VoiceId，不是 Voice 显示名称
-                "filename": str(CacheDir / f"seg_{I:04d}"),
+                "filename": str(CacheDir / f"seg_{I:04d}.wav"),
                 "start_time": int(Sub["start"] * 1000),
                 "end_time": int(Sub["end"] * 1000),
                 "line": I + 1,  # SpeedRate 需要 line 字段
@@ -152,7 +153,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
             # 检查生成的音频文件
             SuccessCount = 0
             for I, Item in enumerate(QueueTts):
-                WavFile = Path(Item["filename"] + ".wav")
+                WavFile = Path(Item["filename"])
                 if WavFile.exists() and WavFile.stat().st_size > 0:
                     SuccessCount += 1
 
@@ -214,12 +215,12 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
 
     Log(f"_GenerateDubbingDirect: Generating {len(Subtitles)} segments...")
 
-    # 构建 queue_tts 格式
+    # 构建 queue_tts 格式（filename 必须包含 .wav 后缀）
     QueueTts = []
     for I, Sub in enumerate(Subtitles):
         QueueTts.append({
             "text": Sub["text"],
-            "filename": str(CacheDir / f"seg_{I:04d}"),
+            "filename": str(CacheDir / f"seg_{I:04d}.wav"),
             "start_time": int(Sub["start"] * 1000),
             "end_time": int(Sub["end"] * 1000),
             "line": I + 1,  # SpeedRate 需要 line 字段
@@ -254,7 +255,7 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
 
     # 检查成功数量
     SuccessCount = sum(1 for Item in QueueTts
-                       if Path(Item["filename"] + ".wav").exists())
+                       if Path(Item["filename"]).exists())
     if SuccessCount == 0:
         Log(f"_GenerateDubbingDirect: No audio files generated")
         return None
@@ -278,7 +279,7 @@ def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path,
 
     # 先检查音频文件是否存在
     for I, Item in enumerate(QueueTts):
-        WavFile = Path(Item["filename"] + ".wav")
+        WavFile = Path(Item["filename"])
         if WavFile.exists():
             Size = WavFile.stat().st_size
             Log(f"  Segment {I}: {WavFile.name} ({Size} bytes)")
@@ -342,7 +343,7 @@ def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path |
 
     AudioFiles = []
     for Item in QueueTts:
-        WavFile = Path(Item["filename"] + ".wav")
+        WavFile = Path(Item["filename"])
         if WavFile.exists() and WavFile.stat().st_size > 0:
             AudioFiles.append((Item["start_time"], WavFile))
             Log(f"  Found: {WavFile.name} at {Item['start_time']}ms")
