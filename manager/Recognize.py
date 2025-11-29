@@ -28,7 +28,7 @@ def FormatSrtTime(Seconds: float) -> str:
 
 
 def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en",
-                   Model: str = "base", UseCuda: bool = None,
+                   Model: str = "medium", UseCuda: bool = False,
                    ProgressCallback=None) -> Path | None:
     """
     使用 videotrans 的 recognition.run 接口识别音频生成字幕
@@ -36,7 +36,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
     OutputSrt: 输出字幕路径，默认为音频同目录下 {Language}.srt
     Language: 语言代码，如 zh, en, ja
     Model: 模型名称，如 tiny, base, small, medium, large-v3
-    UseCuda: 是否使用 GPU 加速（None 为自动检测）
+    UseCuda: 是否使用 GPU 加速（默认 False，使用 CPU）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的 srt 文件路径
     """
@@ -55,14 +55,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         Log(f"RecognizeAudio: SRT already exists: {OutputSrt}")
         return OutputSrt
 
-    # 自动检测 CUDA 可用性
-    if UseCuda is None:
-        try:
-            import torch
-            UseCuda = torch.cuda.is_available()
-        except ImportError:
-            UseCuda = False
-        Log(f"RecognizeAudio: CUDA available: {UseCuda}")
+    Log(f"RecognizeAudio: Using {'CUDA' if UseCuda else 'CPU'} mode")
 
     Log(f"RecognizeAudio: Starting recognition ({Model}, {Language})...")
     if ProgressCallback:
