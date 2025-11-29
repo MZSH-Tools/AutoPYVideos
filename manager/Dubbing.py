@@ -132,6 +132,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                 "filename": str(CacheDir / f"seg_{I:04d}"),
                 "start_time": int(Sub["start"] * 1000),
                 "end_time": int(Sub["end"] * 1000),
+                "line": I + 1,  # SpeedRate 需要 line 字段
             })
 
         Log(f"GenerateDubbing: Calling tts.run with {len(QueueTts)} items")
@@ -204,6 +205,7 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
             "filename": str(CacheDir / f"seg_{I:04d}"),
             "start_time": int(Sub["start"] * 1000),
             "end_time": int(Sub["end"] * 1000),
+            "line": I + 1,  # SpeedRate 需要 line 字段
         })
 
     async def GenerateAll():
@@ -251,18 +253,22 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
 def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path,
                         VoiceAutorate: bool, ProgressCallback) -> Path | None:
     """使用 videotrans 的 SpeedRate 对齐并合并音频"""
+    import copy
     from videotrans.task._rate import SpeedRate
     from videotrans.configure import config
 
     Log(f"_AlignAndMergeAudio: Aligning {len(QueueTts)} segments (autorate={VoiceAutorate})...")
 
+    # 深拷贝，因为 SpeedRate 会修改 queue_tts（可能将 filename 设为 None）
+    QueueTtsCopy = copy.deepcopy(QueueTts)
+
     # 计算总时长（最后一个字幕的结束时间）
     RawTotalTime = QueueTts[-1]["end_time"] if QueueTts else 0
 
     try:
-        # 使用 SpeedRate 进行对齐
+        # 使用 SpeedRate 进行对齐（使用副本，因为 SpeedRate 会修改 queue_tts）
         RateInst = SpeedRate(
-            queue_tts=QueueTts,
+            queue_tts=QueueTtsCopy,
             shoud_audiorate=VoiceAutorate,  # 启用配音自动加速
             shoud_videorate=False,           # 不使用视频慢速（我们没有视频）
             raw_total_time=RawTotalTime,
@@ -284,14 +290,14 @@ def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path,
             return OutputPath
         else:
             Log(f"_AlignAndMergeAudio: SpeedRate did not produce output, using fallback...")
-            return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)
+            return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)  # 使用原始 QueueTts
 
     except Exception as E:
         import traceback
         Log(f"_AlignAndMergeAudio error: {E}")
         Log(traceback.format_exc())
         Log(f"_AlignAndMergeAudio: Falling back to simple merge...")
-        return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)
+        return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)  # 使用原始 QueueTts
 
 
 def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path | None:

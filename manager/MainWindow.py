@@ -271,16 +271,16 @@ class ProcessThread(QThread):
 
 # 状态对应颜色
 StatusColors = {
-    "queued": "#999999",      # 灰色 - 等待
-    "downloading": "#0088ff", # 蓝色 - 下载中
-    "extracting": "#ff8800",  # 橙色 - 提取中
-    "recognizing": "#ff8800", # 橙色 - 识别中
-    "translating": "#ff8800", # 橙色 - 翻译中
-    "dubbing": "#ff8800",     # 橙色 - 配音中
-    "merging": "#ff8800",     # 橙色 - 合成中
-    "ready": "#00aa00",       # 绿色 - 待发布
-    "published": "#666666",   # 深灰 - 已发布
-    "failed": "#cc0000",      # 红色 - 失败
+    "queued": "#888888",      # 灰色 - 等待中
+    "downloading": "#2196F3", # 蓝色 - 下载中
+    "extracting": "#9C27B0",  # 紫色 - 提取中
+    "recognizing": "#FF9800", # 橙色 - 识别中
+    "translating": "#00BCD4", # 青色 - 翻译中
+    "dubbing": "#E91E63",     # 粉色 - 配音中
+    "merging": "#795548",     # 棕色 - 合成中
+    "ready": "#4CAF50",       # 绿色 - 待发布
+    "published": "#9E9E9E",   # 浅灰 - 已发布
+    "failed": "#F44336",      # 红色 - 失败
 }
 
 
@@ -540,19 +540,11 @@ class MainWindow(QMainWindow):
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
 
-        # 需要处理的状态（等待中 或 中间状态需要继续）
-        PendingStatuses = [
-            TaskStatus.Queued.value,
-            TaskStatus.Extracting.value,
-            TaskStatus.Recognizing.value,
-            TaskStatus.Translating.value,
-            TaskStatus.Dubbing.value,
-            TaskStatus.Merging.value,
-        ]
-
-        # 找到第一个需要处理的任务
-        for Key, Task in self.TaskMgr.GetAll():
-            if Task["Status"] in PendingStatuses:
+        # 找到第一个等待中的任务（按时间正序，先处理早的）
+        AllTasks = self.TaskMgr.GetAll()
+        AllTasks.reverse()  # GetAll 返回时间倒序，反转为正序
+        for Key, Task in AllTasks:
+            if Task["Status"] == TaskStatus.Queued.value:
                 self.StartProcessing(Key)
                 return
 

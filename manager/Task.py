@@ -23,19 +23,8 @@ class TaskStatus(Enum):
     Failed = "failed"
 
 
-# 文件名 → 状态映射（根据文件存在推断状态）
-FILE_STATUS_MAP = [
-    ("output.mp4", TaskStatus.Ready),      # 有最终输出 → 待发布
-    ("zh-cn.wav", TaskStatus.Merging),     # 有配音 → 合成中
-    ("zh-cn.srt", TaskStatus.Dubbing),     # 有中文字幕 → 配音中
-    ("en.srt", TaskStatus.Translating),    # 有英文字幕 → 翻译中
-    ("audio.wav", TaskStatus.Recognizing), # 有音频 → 识别中
-    ("video.mp4", TaskStatus.Extracting),  # 有视频 → 提取中
-]
-
-
 def InferStatus(TaskDir: Path) -> TaskStatus:
-    """根据目录内文件推断任务状态"""
+    """根据目录内文件推断任务状态（只区分已完成/未完成）"""
     # 检查是否已发布
     InfoPath = TaskDir / "info.json"
     if InfoPath.exists():
@@ -47,11 +36,11 @@ def InferStatus(TaskDir: Path) -> TaskStatus:
         except:
             pass
 
-    # 根据文件存在推断
-    for FileName, Status in FILE_STATUS_MAP:
-        if (TaskDir / FileName).exists():
-            return Status
+    # 有最终输出 → 待发布
+    if (TaskDir / "output.mp4").exists():
+        return TaskStatus.Ready
 
+    # 其他情况都是等待中（具体处理阶段由 MainWindow 在处理时设置）
     return TaskStatus.Queued
 
 
