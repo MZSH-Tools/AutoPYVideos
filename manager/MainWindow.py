@@ -271,6 +271,7 @@ class ProcessThread(QThread):
                                   TargetLang="zh-cn", SourceLang="en")
 
             # 阶段 5: 配音（中文 TTS）
+            AlignedSrtPath = TaskDir / "aligned.srt"  # 对齐后的字幕（视频慢速时生成）
             if not ZhAudioPath.exists():
                 if IsPaused:
                     Log(f"Task paused before dubbing")
@@ -284,13 +285,17 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "dubbing", 0)
 
                 try:
-                    Result = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
-                                             ProgressCallback=OnDubbingProgress)
-                    if not Result:
+                    DubbingResult = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
+                                                    ProgressCallback=OnDubbingProgress)
+                    if not DubbingResult:
                         Log(f"Dubbing failed: {ZhSrtPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
+                    # 解包结果：(音频路径, 对齐后字幕路径)
+                    _, AlignedSrtPath = DubbingResult
+                    if AlignedSrtPath:
+                        Log(f"Dubbing produced aligned subtitle: {AlignedSrtPath}")
                 except Exception as E:
                     import traceback
                     Log(f"Dubbing error: {E}")
@@ -298,6 +303,10 @@ class ProcessThread(QThread):
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
                     return
+            else:
+                # 配音已存在，检查对齐字幕是否存在
+                if not AlignedSrtPath.exists():
+                    AlignedSrtPath = None
 
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
@@ -313,8 +322,15 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "merging", 0)
 
                 try:
-                    # 使用双语字幕（中文在上，英文在下）
-                    SubtitlePath = BilingualSrtPath if BilingualSrtPath.exists() else ZhSrtPath
+                    # 优先使用对齐后的字幕（视频慢速后时间轴正确）
+                    # 否则使用双语字幕或中文字幕
+                    if AlignedSrtPath and AlignedSrtPath.exists():
+                        SubtitlePath = AlignedSrtPath
+                        Log(f"Using aligned subtitle for merge: {SubtitlePath}")
+                    elif BilingualSrtPath.exists():
+                        SubtitlePath = BilingualSrtPath
+                    else:
+                        SubtitlePath = ZhSrtPath
                     Result = MergeVideo(VideoPath, ZhAudioPath, SubtitlePath, OutputPath,
                                         HardSubtitle=True, ProgressCallback=OnMergeProgress)
                     if not Result:

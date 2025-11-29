@@ -28,6 +28,40 @@ def ParseSrtTime(TimeStr: str) -> float:
     return int(Hours) * 3600 + int(Minutes) * 60 + int(Seconds) + int(Millis) / 1000
 
 
+def FormatSrtTime(Ms: int) -> str:
+    """将毫秒转换为 SRT 时间格式 HH:MM:SS,mmm"""
+    Hours = Ms // 3600000
+    Minutes = (Ms % 3600000) // 60000
+    Seconds = (Ms % 60000) // 1000
+    Millis = Ms % 1000
+    return f"{Hours:02d}:{Minutes:02d}:{Seconds:02d},{Millis:03d}"
+
+
+def _GenerateNewSrt(QueueTts: list, OutputDir: Path) -> Path | None:
+    """根据 SpeedRate 返回的新时间轴生成字幕文件"""
+    OutputPath = OutputDir / "aligned.srt"
+
+    Lines = []
+    for Idx, Item in enumerate(QueueTts):
+        Text = Item.get("text", "").strip()
+        if not Text:
+            continue
+        StartTime = FormatSrtTime(Item.get("start_time", 0))
+        EndTime = FormatSrtTime(Item.get("end_time", 0))
+        Lines.append(str(Idx + 1))
+        Lines.append(f"{StartTime} --> {EndTime}")
+        Lines.append(Text)
+        Lines.append("")
+
+    if not Lines:
+        Log(f"_GenerateNewSrt: No subtitles to write")
+        return None
+
+    OutputPath.write_text("\n".join(Lines), encoding="utf-8")
+    Log(f"_GenerateNewSrt: Generated aligned subtitle -> {OutputPath}")
+    return OutputPath
+
+
 def ParseSrt(SrtPath: Path) -> list[dict]:
     """解析 SRT 字幕文件，返回 [{start, end, text}, ...]"""
     if not SrtPath.exists():
@@ -62,17 +96,17 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                     Voice: str = "晓晓 多语言(Female/CN)", VideoPath: Path = None,
                     VoiceAutorate: bool = False, VideoSlowdown: bool = True,
-                    ProgressCallback=None) -> Path | None:
+                    ProgressCallback=None) -> tuple[Path, Path] | None:
     """
     使用 videotrans 的 tts.run 接口根据字幕生成配音音频，并使用 SpeedRate 对齐
     SrtPath: 输入字幕路径
     OutputPath: 输出音频路径，默认为同目录下 zh-cn.wav
     Voice: edge-tts 声音显示名称（如 晓晓 多语言(Female/CN)）
-    VideoPath: 原视频路径（视频慢速时需要）
+    VideoPath: 原视频路径（视频慢速时需要，会被原地修改为慢速视频）
     VoiceAutorate: 是否启用配音自动加速对齐（默认 False）
     VideoSlowdown: 是否启用视频慢速对齐（默认 True）
     ProgressCallback: 进度回调 (percent, text)
-    返回生成的音频文件路径
+    返回 (音频路径, 对齐后字幕路径) 或 None
     """
     from videotrans import tts
     from videotrans.configure import config
@@ -85,10 +119,13 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     if OutputPath is None:
         OutputPath = SrtPath.parent / "zh-cn.wav"
 
-    # 已存在则跳过
+    # 已存在则跳过（检查对齐字幕是否也存在）
+    AlignedSrtPath = SrtPath.parent / "aligned.srt"
     if OutputPath.exists():
         Log(f"GenerateDubbing: Audio already exists: {OutputPath}")
-        return OutputPath
+        if AlignedSrtPath.exists():
+            return (OutputPath, AlignedSrtPath)
+        return (OutputPath, None)
 
     Log(f"GenerateDubbing: Parsing subtitles...")
     Subtitles = ParseSrt(SrtPath)
@@ -321,29 +358,33 @@ def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path, VideoP
         if ProgressCallback:
             ProgressCallback(70, "Processing alignment...")
 
-        # 执行对齐
-        RateInst.run()
+        # 执行对齐，返回更新后的 queue_tts（包含新时间轴）
+        UpdatedQueueTts = RateInst.run()
 
         if OutputPath.exists():
             Size = OutputPath.stat().st_size
             Log(f"_AlignAndMergeAudio: Output file size = {Size} bytes")
             if Size > 1000:  # 至少 1KB 才算有效
                 Log(f"_AlignAndMergeAudio: Done -> {OutputPath}")
-                return OutputPath
+                # 如果启用了视频慢速，生成新的字幕文件
+                NewSrtPath = None
+                if VideoSlowdown and UpdatedQueueTts:
+                    NewSrtPath = _GenerateNewSrt(UpdatedQueueTts, OutputPath.parent)
+                return (OutputPath, NewSrtPath)
             else:
                 Log(f"_AlignAndMergeAudio: Output too small, using fallback...")
                 OutputPath.unlink()  # 删除无效文件
-                return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)
+                return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
         else:
             Log(f"_AlignAndMergeAudio: SpeedRate did not produce output, using fallback...")
-            return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)  # 使用原始 QueueTts
+            return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
 
     except Exception as E:
         import traceback
         Log(f"_AlignAndMergeAudio error: {E}")
         Log(traceback.format_exc())
         Log(f"_AlignAndMergeAudio: Falling back to simple merge...")
-        return _MergeAudioSimple(QueueTts, OutputPath, CacheDir)  # 使用原始 QueueTts
+        return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
 
 
 def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path | None:
