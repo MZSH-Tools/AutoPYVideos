@@ -78,7 +78,7 @@ class TaskManager:
             return None
 
     def SaveTask(self, Key: str):
-        """保存任务信息到 info.json"""
+        """保存任务信息到 info.json（同时创建 log.txt）"""
         if Key not in self.Tasks:
             return
         Task = self.Tasks[Key].copy()
@@ -88,8 +88,12 @@ class TaskManager:
 
         TaskDir = self.GetTaskDir(Key)
         InfoPath = TaskDir / "info.json"
+        LogPath = TaskDir / "log.txt"
         with open(InfoPath, "w", encoding="utf-8") as F:
             json.dump(Task, F, ensure_ascii=False, indent=2)
+        # 同步创建 log.txt（如不存在）
+        if not LogPath.exists():
+            LogPath.touch()
 
     def GetTaskDir(self, Key: str) -> Path:
         """获取任务目录"""
@@ -103,10 +107,12 @@ class TaskManager:
         self.Tasks[Key] = {
             "Url": Url,
             "Title": "",
+            "TitleZh": "",  # 翻译后的中文标题
             "Author": "",
             "Thumbnail": "",
             "VideoId": "",
             "PublishUrl": "",
+            "DescExtraZh": "",  # 翻译后的简介附加（从全局设置翻译而来）
             "Error": "",
             "Status": TaskStatus.Queued.value,
             "Progress": 0,
@@ -172,7 +178,7 @@ class TaskManager:
                 V = V.value
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
-            if K in ["Title", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url"]:
+            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "DescExtraZh"]:
                 NeedSave = True
         if NeedSave:
             self.SaveTask(Key)

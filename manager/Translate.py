@@ -147,6 +147,52 @@ def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path
     return OutputPath
 
 
+def TranslateText(Text: str, SourceLang: str = "en", TargetLang: str = "zh-cn",
+                  TranslateType: int = None) -> str | None:
+    """
+    翻译单个文本
+    Text: 要翻译的文本
+    SourceLang: 源语言代码
+    TargetLang: 目标语言代码
+    TranslateType: 翻译引擎类型（默认 GOOGLE_INDEX）
+    返回翻译后的文本，失败返回 None
+    """
+    from videotrans import translator
+    from videotrans.translator import GOOGLE_INDEX
+    from videotrans.configure import config
+
+    if not Text or not Text.strip():
+        return None
+
+    if TranslateType is None:
+        TranslateType = GOOGLE_INDEX
+
+    OrigBoxTrans = config.box_trans
+
+    try:
+        config.box_trans = 'ing'
+        TextList = [{"text": Text, "line": 1}]
+
+        Result = translator.run(
+            translate_type=TranslateType,
+            text_list=TextList,
+            source_code=SourceLang,
+            target_code=TargetLang
+        )
+
+        if Result and len(Result) > 0:
+            Item = Result[0]
+            return Item["text"] if isinstance(Item, dict) else str(Item)
+        return None
+
+    except Exception as E:
+        Log(f"TranslateText error: {E}")
+        return None
+
+    finally:
+        config.box_trans = OrigBoxTrans
+
+
 def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
                  SourceLang: str = "en", TargetLang: str = "zh-cn",
                  TranslateType: int = None,

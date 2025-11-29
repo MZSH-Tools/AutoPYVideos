@@ -6,16 +6,17 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QLabel, QFrame, QSplitter, QApplication, QTextEdit
 )
-from PySide6.QtCore import Signal, Qt, QThread, QObject
+from PySide6.QtCore import Signal, Qt, QThread, QObject, QTimer
 from PySide6.QtGui import QCloseEvent, QColor
 
 from pathlib import Path
 from Task import TaskManager, TaskStatus
+from Storage import LoadSettings, SaveSettings
 from Extract import ExtractAudio
 import Recognize
 from Recognize import RecognizeAudio
 import Translate
-from Translate import TranslateSrt, MergeBilingualSrt
+from Translate import TranslateSrt, MergeBilingualSrt, TranslateText
 import Dubbing
 from Dubbing import GenerateDubbing
 import Merge
@@ -45,23 +46,20 @@ PauseEmitter = PauseSignal()
 
 
 def SetPaused(Paused: bool):
-    """设置暂停状态"""
+    """设置暂停状态（全局操作，不记录到任务日志）"""
     global IsPaused
     IsPaused = Paused
     PauseEmitter.Changed.emit(Paused)
-    if Paused:
-        Log("Processing paused - will stop after current stage")
-    else:
-        Log("Processing resumed")
 
 
-def Log(Msg: str):
-    """普通日志（使用当前处理任务的Key）"""
-    LogEmitter.Message.emit(CurrentProcessingKey or "", Msg, False)
+def Log(Msg: str, Key: str = None):
+    """普通日志（Key为None时使用当前处理任务的Key）"""
+    ActualKey = Key if Key is not None else (CurrentProcessingKey or "")
+    LogEmitter.Message.emit(ActualKey, Msg, False)
 
 
 def LogDebug(Msg: str):
-    """调试日志"""
+    """调试日志（不写入任务日志文件）"""
     LogEmitter.Message.emit("", Msg, True)
 
 
@@ -79,7 +77,7 @@ class LogWriter:
 
     def write(self, Msg):
         if Msg.strip():
-            LogEmitter.Message.emit(Msg.strip(), True)
+            LogEmitter.Message.emit(CurrentProcessingKey or "", Msg.strip(), True)
 
     def flush(self):
         pass
@@ -127,6 +125,29 @@ class ProcessThread(QThread):
         if not Task:
             self.Finished.emit(self.Key, False)
             return
+
+        # 如果还没有视频信息，先获取
+        if not Task.get("Title"):
+            Log(f"Fetching video info...")
+            self.TaskMgr.FetchInfo(self.Key)
+            Task = self.TaskMgr.Get(self.Key)  # 重新获取更新后的任务
+
+        # 如果还没翻译标题，先翻译（在下载前就可以看到中文标题预览）
+        if Task and Task.get("Title") and not Task.get("TitleZh"):
+            Log(f"Translating title...")
+            TitleZh = TranslateText(Task["Title"], SourceLang="en", TargetLang="zh-cn")
+            if TitleZh:
+                Log(f"Title translated: {TitleZh}")
+                self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
+
+        # 翻译简介附加（从全局设置读取，翻译后保存到任务）
+        DescExtra = LoadSettings().get("DescriptionExtra", "")
+        if Task and DescExtra and not Task.get("DescExtraZh"):
+            Log(f"Translating description extra...")
+            DescExtraZh = TranslateText(DescExtra, SourceLang="zh-cn", TargetLang="en")
+            if DescExtraZh:
+                Log(f"Description extra translated: {DescExtraZh}")
+                self.TaskMgr.Update(self.Key, DescExtraZh=DescExtraZh)
 
         TaskDir = self.TaskMgr.GetTaskDir(self.Key)
         VideoPath = TaskDir / "video.mp4"
@@ -338,7 +359,7 @@ StatusColors = {
     "extracting": "#9C27B0",  # 紫色 - 提取中
     "recognizing": "#FF9800", # 橙色 - 识别中
     "translating": "#00BCD4", # 青色 - 翻译中
-    "dubbing": "#E91E63",     # 粉色 - 配音中
+    "dubbing": "#3F51B5",     # 靛蓝 - 配音中
     "merging": "#795548",     # 棕色 - 合成中
     "paused": "#FFC107",      # 黄色 - 已暂停
     "ready": "#4CAF50",       # 绿色 - 待发布
@@ -358,10 +379,14 @@ class MainWindow(QMainWindow):
         self.CurKey = None
         self.CurSpeed = 0  # 当前下载速度 bytes/s
         self.ProcessThread = None  # 当前处理线程（同时只处理一个）
+        self.LogFilePos = 0  # 日志文件读取位置
         self.SetupUI()
         # 监听暂停状态变化
         PauseEmitter.Changed.connect(self.OnPauseChanged)
-        Log("Manager started")
+        # 定时刷新日志显示
+        self.LogTimer = QTimer(self)
+        self.LogTimer.timeout.connect(self.RefreshLogDisplay)
+        self.LogTimer.start(500)  # 每500ms刷新
         self.RefreshList()
         self.SelectProcessingTask()
         self.TryStartProcessing()
@@ -369,25 +394,55 @@ class MainWindow(QMainWindow):
     def SetupUI(self):
         """初始化界面"""
         self.setWindowTitle("AutoPYVideos Manager")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(1100, 750)
 
         Central = QWidget()
         self.setCentralWidget(Central)
         Layout = QVBoxLayout(Central)
 
+        # 顶部区域：搜索栏 + 全局设置
+        TopLayout = QHBoxLayout()
+
         # 搜索栏
-        SearchLayout = QHBoxLayout()
         self.UrlInput = QLineEdit()
         self.UrlInput.setPlaceholderText("输入 YouTube 链接...")
         self.UrlInput.returnPressed.connect(self.OnSearch)
-        SearchLayout.addWidget(self.UrlInput)
+        TopLayout.addWidget(self.UrlInput)
 
         self.SearchBtn = QPushButton("🔍")
         self.SearchBtn.setFixedWidth(40)
         self.SearchBtn.clicked.connect(self.OnSearch)
-        SearchLayout.addWidget(self.SearchBtn)
+        TopLayout.addWidget(self.SearchBtn)
 
-        Layout.addLayout(SearchLayout)
+        TopLayout.addSpacing(20)
+
+        # 全局设置
+        TopLayout.addWidget(QLabel("标题前缀:"))
+        self.TitlePrefixEdit = QLineEdit()
+        self.TitlePrefixEdit.setFixedWidth(60)
+        self.TitlePrefixEdit.setPlaceholderText("【中字】")
+        self.TitlePrefixEdit.editingFinished.connect(self.OnSettingsChanged)
+        TopLayout.addWidget(self.TitlePrefixEdit)
+
+        TopLayout.addWidget(QLabel("后缀:"))
+        self.TitleSuffixEdit = QLineEdit()
+        self.TitleSuffixEdit.setFixedWidth(60)
+        self.TitleSuffixEdit.setPlaceholderText("(配音)")
+        self.TitleSuffixEdit.editingFinished.connect(self.OnSettingsChanged)
+        TopLayout.addWidget(self.TitleSuffixEdit)
+
+        Layout.addLayout(TopLayout)
+
+        # 第二行：简介附加（多行输入，全局设置）
+        DescExtraLayout = QHBoxLayout()
+        DescExtraLayout.addWidget(QLabel("简介附加:"))
+        self.DescExtraEdit = QTextEdit()
+        self.DescExtraEdit.setPlaceholderText("发布时附加的简介内容（多行）...")
+        self.DescExtraEdit.setMaximumHeight(50)
+        self.DescExtraEdit.setStyleSheet("font-size: 12px;")
+        self.DescExtraEdit.textChanged.connect(self.OnSettingsChanged)
+        DescExtraLayout.addWidget(self.DescExtraEdit)
+        Layout.addLayout(DescExtraLayout)
 
         # 分割器：左侧列表 + 右侧详情
         Splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -455,7 +510,37 @@ class MainWindow(QMainWindow):
 
         DetailLayout.addSpacing(10)
 
-        DetailLayout.addStretch()
+        # 预览信息
+        PreviewHeader = QLabel("发布预览:")
+        PreviewHeader.setStyleSheet(HeaderStyle)
+        DetailLayout.addWidget(PreviewHeader)
+
+        # 标题预览 + 复制按钮
+        TitlePreviewLayout = QHBoxLayout()
+        TitlePreviewLayout.addWidget(QLabel("标题:"))
+        self.TitlePreview = QLineEdit()
+        self.TitlePreview.setReadOnly(True)
+        self.TitlePreview.setStyleSheet("background: #f0f0f0;")
+        TitlePreviewLayout.addWidget(self.TitlePreview)
+        self.CopyTitleBtn = QPushButton("复制")
+        self.CopyTitleBtn.setFixedWidth(50)
+        self.CopyTitleBtn.clicked.connect(self.OnCopyTitle)
+        TitlePreviewLayout.addWidget(self.CopyTitleBtn)
+        DetailLayout.addLayout(TitlePreviewLayout)
+
+        # 简介预览 + 复制按钮
+        DescPreviewLayout = QHBoxLayout()
+        DescPreviewLayout.addWidget(QLabel("简介:"))
+        self.DescPreview = QTextEdit()
+        self.DescPreview.setReadOnly(True)
+        self.DescPreview.setMinimumHeight(100)
+        self.DescPreview.setStyleSheet("background: #f0f0f0; font-size: 12px;")
+        DescPreviewLayout.addWidget(self.DescPreview)
+        self.CopyDescBtn = QPushButton("复制")
+        self.CopyDescBtn.setFixedWidth(50)
+        self.CopyDescBtn.clicked.connect(self.OnCopyDesc)
+        DescPreviewLayout.addWidget(self.CopyDescBtn)
+        DetailLayout.addLayout(DescPreviewLayout)
 
         # 发布链接（可编辑，贴在底部）
         PublishLayout = QHBoxLayout()
@@ -473,22 +558,23 @@ class MainWindow(QMainWindow):
         self.OpenFolderBtn.clicked.connect(self.OnOpenFolder)
         DetailLayout.addWidget(self.OpenFolderBtn)
 
-        Splitter.setSizes([250, 650])
+        Splitter.setSizes([250, 850])
 
-        # 底部区域：左侧当前任务流程 + 右侧日志
+        # 底部区域：左侧任务流程 + 右侧日志
         BottomLayout = QHBoxLayout()
 
-        # 左侧：当前任务流程
-        PipelinePanel = QFrame()
-        PipelinePanel.setFrameShape(QFrame.Shape.StyledPanel)
-        PipelinePanel.setFixedWidth(200)
-        PipelineLayout = QVBoxLayout(PipelinePanel)
-        PipelineLayout.setContentsMargins(10, 5, 10, 5)
+        # 左侧面板：任务流程
+        LeftPanel = QFrame()
+        LeftPanel.setFrameShape(QFrame.Shape.StyledPanel)
+        LeftPanel.setFixedWidth(200)
+        LeftLayout = QVBoxLayout(LeftPanel)
+        LeftLayout.setContentsMargins(10, 5, 10, 5)
+        LeftLayout.setSpacing(3)
 
         # 当前任务标题
         self.PipelineTitle = QLabel("当前任务: 无")
         self.PipelineTitle.setStyleSheet("font-size: 12px; font-weight: bold; color: #333;")
-        PipelineLayout.addWidget(self.PipelineTitle)
+        LeftLayout.addWidget(self.PipelineTitle)
 
         # 流水线阶段
         self.StageLabels = {}
@@ -503,20 +589,30 @@ class MainWindow(QMainWindow):
         for StageKey, StageName in StageNames:
             Label = QLabel(f"○ {StageName}")
             Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
-            PipelineLayout.addWidget(Label)
+            LeftLayout.addWidget(Label)
             self.StageLabels[StageKey] = Label
 
-        PipelineLayout.addStretch()
-        BottomLayout.addWidget(PipelinePanel)
+        LeftLayout.addStretch()
+
+        # 运行状态标签（放大居中，与流程拉开距离）
+        self.StatusLabel = QLabel("● 运行中")
+        self.StatusLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50; padding: 10px 5px;")
+        LeftLayout.addWidget(self.StatusLabel)
+        self.UpdateStatusLabel()
+
+        BottomLayout.addWidget(LeftPanel)
 
         # 右侧：日志
         self.LogText = QTextEdit()
         self.LogText.setReadOnly(True)
-        self.LogText.setMaximumHeight(140)
         self.LogText.setStyleSheet("font-family: Consolas, monospace; font-size: 12px; background: #f5f5f5; color: #333;")
         BottomLayout.addWidget(self.LogText)
 
         Layout.addLayout(BottomLayout)
+
+        # 加载全局设置
+        self.LoadGlobalSettings()
 
         # 连接日志信号
         LogEmitter.Message.connect(self.AppendLog)
@@ -526,8 +622,8 @@ class MainWindow(QMainWindow):
         self.FetchThreads = []
 
     def AppendLog(self, Key: str, Msg: str, IsDebug: bool = False):
-        """添加日志（Key为任务Key，空表示全局日志）"""
-        # Debug 日志只在 Debug 模式下显示
+        """添加日志（Key为任务Key，空表示全局日志）- 只写入文件"""
+        # Debug 日志只在 Debug 模式下显示（不写文件）
         if IsDebug and not DebugMode:
             return
         TimeStr = datetime.now().strftime("%H:%M:%S")
@@ -537,11 +633,6 @@ class MainWindow(QMainWindow):
         # 保存到任务日志文件（非Debug且有Key时）
         if Key and not IsDebug:
             self.SaveTaskLog(Key, LogLine)
-
-        # 如果当前选中的任务就是这个Key，或者是全局日志，则显示
-        if not Key or Key == self.CurKey:
-            self.LogText.append(LogLine)
-            self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
 
     def SaveTaskLog(self, Key: str, LogLine: str):
         """保存日志到任务目录"""
@@ -554,17 +645,41 @@ class MainWindow(QMainWindow):
             pass
 
     def LoadTaskLog(self, Key: str):
-        """加载任务日志到日志面板"""
+        """加载任务日志到日志面板（完整加载并记录位置）"""
         self.LogText.clear()
+        self.LogFilePos = 0
         TaskDir = self.TaskMgr.GetTaskDir(Key)
         LogPath = TaskDir / "log.txt"
         if LogPath.exists():
             try:
                 Content = LogPath.read_text(encoding="utf-8")
-                self.LogText.setPlainText(Content.rstrip())
-                self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
+                self.LogFilePos = len(Content.encode("utf-8"))
+                if Content.strip():
+                    self.LogText.setPlainText(Content.rstrip())
+                    self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
             except:
                 pass
+
+    def RefreshLogDisplay(self):
+        """定时刷新日志显示（增量读取）"""
+        if not self.CurKey:
+            return
+        TaskDir = self.TaskMgr.GetTaskDir(self.CurKey)
+        LogPath = TaskDir / "log.txt"
+        if not LogPath.exists():
+            return
+        try:
+            with open(LogPath, "rb") as F:
+                F.seek(self.LogFilePos)
+                NewData = F.read()
+                if NewData:
+                    self.LogFilePos += len(NewData)
+                    NewText = NewData.decode("utf-8", errors="ignore").rstrip()
+                    if NewText:
+                        self.LogText.append(NewText)
+                        self.LogText.verticalScrollBar().setValue(self.LogText.verticalScrollBar().maximum())
+        except:
+            pass
 
     def OnSearch(self):
         """搜索/添加链接"""
@@ -577,12 +692,11 @@ class MainWindow(QMainWindow):
             Key, Task = Found
             self.RefreshList()
             self.SelectTask(Key)
-            Log(f"Task already exists: {Url[:50]}...")
         else:
             Key = self.TaskMgr.Add(Url)
             self.RefreshList()
             self.SelectTask(Key)
-            Log(f"Task added, fetching info...")
+            Log(f"Task added, fetching info...", Key)
             # 后台获取视频信息
             self.StartFetchInfo(Key, Url)
 
@@ -599,9 +713,9 @@ class MainWindow(QMainWindow):
         """视频信息获取完成"""
         Task = self.TaskMgr.Get(Key)
         if Success and Task:
-            Log(f"Info fetched: {Task.get('Title', '')[:30]}")
+            Log(f"Info fetched: {Task.get('Title', '')[:30]}", Key)
         else:
-            Log(f"Failed to fetch info for task {Key}")
+            Log(f"Failed to fetch info", Key)
         # 刷新列表和详情（保持选中）
         self.RefreshList()
         if self.CurKey == Key and Task:
@@ -693,10 +807,46 @@ class MainWindow(QMainWindow):
 
     def OnPauseChanged(self, Paused: bool):
         """暂停状态变化"""
+        self.UpdateStatusLabel()
         self.RefreshList()
         if not Paused:
             # 恢复后尝试继续处理
             self.TryStartProcessing()
+
+    def UpdateStatusLabel(self):
+        """更新运行状态标签"""
+        if IsPaused:
+            self.StatusLabel.setText("● 已暂停")
+            self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFC107; padding: 10px 5px;")
+        else:
+            self.StatusLabel.setText("● 运行中")
+            self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50; padding: 10px 5px;")
+
+    def LoadGlobalSettings(self):
+        """加载全局设置到UI"""
+        Settings = LoadSettings()
+        self.TitlePrefixEdit.setText(Settings.get("TitlePrefix", ""))
+        self.TitleSuffixEdit.setText(Settings.get("TitleSuffix", ""))
+        self.DescExtraEdit.setPlainText(Settings.get("DescriptionExtra", ""))
+
+    def OnSettingsChanged(self):
+        """设置变化时保存并刷新预览"""
+        Settings = {
+            "TitlePrefix": self.TitlePrefixEdit.text(),
+            "TitleSuffix": self.TitleSuffixEdit.text(),
+            "DescriptionExtra": self.DescExtraEdit.toPlainText(),
+        }
+        SaveSettings(Settings)
+        # 刷新当前任务预览
+        if self.CurKey:
+            Task = self.TaskMgr.Get(self.CurKey)
+            if Task:
+                TitleZh = Task.get("TitleZh") or ""
+                RawTitle = Task.get("Title") or ""
+                Author = Task.get("Author") or ""
+                Url = Task.get("Url") or ""
+                DescExtraZh = Task.get("DescExtraZh") or ""
+                self.UpdatePreview(TitleZh or RawTitle, Author, Url, DescExtraZh)
 
     def UpdatePipelineDisplay(self, Key: str, Status: str, Progress: int):
         """更新流水线阶段显示（显示当前处理任务）"""
@@ -853,8 +1003,9 @@ class MainWindow(QMainWindow):
 
     def UpdateDetail(self, Key: str, Task: dict):
         """更新详情面板"""
-        Title = Task.get("Title") or "加载中..."
-        Author = Task.get("Author") or ""
+        RawTitle = Task.get("Title") or ""
+        TitleZh = Task.get("TitleZh") or ""
+        RawAuthor = Task.get("Author") or ""
         Url = Task["Url"]
         Status = Task["Status"]
         Progress = Task["Progress"]
@@ -876,9 +1027,12 @@ class MainWindow(QMainWindow):
 
         Color = StatusColors.get(Status, "#666666")
 
+        # 显示用的标题（空则显示加载中）
+        DisplayTitle = RawTitle or "加载中..."
+
         # 原作者、原标题、原链接
-        self.DetailAuthor.setText(f"原作者: {Author}" if Author else "")
-        self.DetailTitle.setText(f"原标题: {Title}")
+        self.DetailAuthor.setText(f"原作者: {RawAuthor}" if RawAuthor else "原作者: 加载中...")
+        self.DetailTitle.setText(f"原标题: {DisplayTitle}")
         self.DetailUrl.setText(f"原链接: {Url}")
         self.CurUrl = Url  # 保存用于复制
         self.CopyUrlBtn.setVisible(True)
@@ -897,11 +1051,59 @@ class MainWindow(QMainWindow):
         # 发布链接（可编辑）
         self.PublishUrlEdit.setText(PublishUrl)
 
+        # 更新发布预览（使用翻译后的标题和简介附加）
+        DescExtraZh = Task.get("DescExtraZh") or ""
+        self.UpdatePreview(TitleZh or RawTitle, RawAuthor, Url, DescExtraZh)
+
     def OnCopyUrl(self):
         """复制原链接到剪贴板"""
         if hasattr(self, "CurUrl") and self.CurUrl:
             QApplication.clipboard().setText(self.CurUrl)
-            Log("链接已复制")
+
+    def UpdatePreview(self, Title: str, Author: str, Url: str, DescExtraZh: str = ""):
+        """更新发布预览"""
+        Settings = LoadSettings()
+        Prefix = Settings.get("TitlePrefix", "")
+        Suffix = Settings.get("TitleSuffix", "")
+        DescExtra = Settings.get("DescriptionExtra", "")
+
+        # 标题预览：前缀 + 原标题 + 后缀（如果没有标题则显示提示）
+        if Title:
+            PreviewTitle = f"{Prefix}{Title}{Suffix}"
+        else:
+            PreviewTitle = "(标题加载中...)"
+        self.TitlePreview.setText(PreviewTitle)
+
+        # 简介预览：原标题、原作者、原链接 + 简介附加（优先用翻译后的）
+        DescLines = []
+        if Title:
+            DescLines.append(f"原标题: {Title}")
+        else:
+            DescLines.append("原标题: (加载中...)")
+        if Author:
+            DescLines.append(f"原作者: {Author}")
+        else:
+            DescLines.append("原作者: (加载中...)")
+        if Url:
+            DescLines.append(f"原链接: {Url}")
+        # 简介附加：优先使用翻译后的，否则用原始的
+        ActualDescExtra = DescExtraZh or DescExtra
+        if ActualDescExtra:
+            DescLines.append("")
+            DescLines.append(ActualDescExtra)
+        self.DescPreview.setPlainText("\n".join(DescLines))
+
+    def OnCopyTitle(self):
+        """复制标题预览到剪贴板"""
+        Text = self.TitlePreview.text()
+        if Text:
+            QApplication.clipboard().setText(Text)
+
+    def OnCopyDesc(self):
+        """复制简介预览到剪贴板"""
+        Text = self.DescPreview.toPlainText()
+        if Text:
+            QApplication.clipboard().setText(Text)
 
     def OnPublishUrlChanged(self):
         """发布链接编辑完成"""
@@ -935,6 +1137,8 @@ class MainWindow(QMainWindow):
         self.DetailUrl.setText("")
         self.CopyUrlBtn.setVisible(False)
         self.PublishUrlEdit.setText("")
+        self.TitlePreview.setText("")
+        self.DescPreview.setPlainText("")
 
     def closeEvent(self, Event: QCloseEvent):
         """关闭窗口时隐藏而非退出"""
