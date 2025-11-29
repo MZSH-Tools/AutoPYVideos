@@ -1,7 +1,5 @@
-# 字幕翻译模块
+# 字幕翻译模块（调用 videotrans 的 translator 接口）
 import re
-import time
-import requests
 from pathlib import Path
 
 # 日志回调（由 MainWindow 设置）
@@ -79,41 +77,22 @@ def WriteSrt(Subtitles: list[dict], OutputPath: Path):
     OutputPath.write_text("\n".join(Lines), encoding="utf-8")
 
 
-def GoogleTranslate(Text: str, SourceLang: str = "zh-CN", TargetLang: str = "en") -> str | None:
-    """
-    使用 Google Translate 免费 API 翻译文本
-    """
-    Url = f"https://translate.google.com/m?sl={SourceLang}&tl={TargetLang}&q={requests.utils.quote(Text)}"
-    Headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15"
-    }
-
-    try:
-        Resp = requests.get(Url, headers=Headers, timeout=30, verify=False)
-        Resp.raise_for_status()
-
-        # 提取翻译结果
-        Match = re.search(r'<div\s+class="result-container">([^<]+)<', Resp.text)
-        if Match:
-            return Match.group(1).strip()
-        return None
-    except Exception as E:
-        Log(f"GoogleTranslate error: {E}")
-        return None
-
-
 def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
-                 SourceLang: str = "zh-CN", TargetLang: str = "en",
+                 SourceLang: str = "en", TargetLang: str = "zh-cn",
                  ProgressCallback=None) -> Path | None:
     """
     翻译 SRT 字幕文件
+    调用 videotrans 的 translator.run 接口
     InputSrt: 输入字幕路径
     OutputSrt: 输出字幕路径，默认为同目录下 {TargetLang}.srt
-    SourceLang: 源语言代码
-    TargetLang: 目标语言代码
+    SourceLang: 源语言代码（如 en, zh-cn）
+    TargetLang: 目标语言代码（如 zh-cn, en）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的 srt 文件路径
     """
+    from videotrans import translator
+    from videotrans.translator import GOOGLE_INDEX
+
     if not InputSrt.exists():
         Log(f"TranslateSrt: Input not found: {InputSrt}")
         return None
@@ -132,41 +111,48 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         Log(f"TranslateSrt: No subtitles found in {InputSrt}")
         return None
 
-    Total = len(Subtitles)
-    Translated = []
-
+    Log(f"TranslateSrt: Translating {len(Subtitles)} subtitles ({SourceLang} -> {TargetLang})...")
     if ProgressCallback:
-        ProgressCallback(0, "Starting translation...")
+        ProgressCallback(10, "Translating...")
 
-    for I, Sub in enumerate(Subtitles):
-        Text = Sub["text"]
+    try:
+        # 转换为 videotrans 格式：[{"text": "...", "line": 1}, ...]
+        TextList = [{"text": Sub["text"], "line": Sub["line"]} for Sub in Subtitles]
 
-        # 翻译
-        Result = GoogleTranslate(Text, SourceLang, TargetLang)
-        if Result is None:
-            # 翻译失败，保留原文
-            Result = Text
+        # 调用 videotrans 翻译接口（默认 Google，失败自动回退 Microsoft）
+        Result = translator.run(
+            translate_type=GOOGLE_INDEX,
+            text_list=TextList,
+            source_code=SourceLang,
+            target_code=TargetLang
+        )
 
-        Translated.append({
-            "line": Sub["line"],
-            "start": Sub["start"],
-            "end": Sub["end"],
-            "text": Result
-        })
+        if not Result:
+            Log(f"TranslateSrt: Translation failed")
+            return None
 
-        # 进度回调
+        # 合并翻译结果
+        Translated = []
+        for I, Sub in enumerate(Subtitles):
+            TransText = Result[I] if I < len(Result) else Sub["text"]
+            Translated.append({
+                "line": Sub["line"],
+                "start": Sub["start"],
+                "end": Sub["end"],
+                "text": TransText
+            })
+
+        # 写入文件
+        WriteSrt(Translated, OutputSrt)
+
         if ProgressCallback:
-            Percent = int((I + 1) * 100 / Total)
-            Preview = Result[:30] + "..." if len(Result) > 30 else Result
-            ProgressCallback(Percent, Preview)
+            ProgressCallback(100, "Done")
 
-        # 避免请求过快被限制
-        time.sleep(0.5)
+        Log(f"TranslateSrt: Done -> {OutputSrt}")
+        return OutputSrt
 
-    # 写入文件
-    WriteSrt(Translated, OutputSrt)
-
-    if ProgressCallback:
-        ProgressCallback(100, "Done")
-
-    return OutputSrt
+    except Exception as E:
+        import traceback
+        Log(f"TranslateSrt error: {E}")
+        Log(traceback.format_exc())
+        return None

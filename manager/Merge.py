@@ -1,5 +1,7 @@
-# 音视频合成模块（ffmpeg）
-import subprocess
+# 音视频合成模块（调用 videotrans 的 ffmpeg 接口）
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 # 日志回调（由 MainWindow 设置）
@@ -18,29 +20,99 @@ def Log(Msg: str):
         print(Msg)
 
 
-def GetVideoDuration(VideoPath: Path) -> float:
-    """获取视频时长（秒）"""
+def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
+                          OutputPath: Path, ProgressCallback=None) -> bool:
+    """
+    将视频、音频和字幕合并（硬字幕，烧录到视频画面）
+    调用 videotrans 的 runffmpeg 接口
+    """
+    from videotrans.util.help_ffmpeg import runffmpeg
+    from videotrans.configure import config
+
+    if not VideoPath.exists():
+        Log(f"MergeWithHardSubtitle: Video not found: {VideoPath}")
+        return False
+
+    if not AudioPath.exists():
+        Log(f"MergeWithHardSubtitle: Audio not found: {AudioPath}")
+        return False
+
+    if not SubtitlePath.exists():
+        Log(f"MergeWithHardSubtitle: Subtitle not found: {SubtitlePath}")
+        return False
+
+    Log(f"MergeWithHardSubtitle: Burning subtitle into video...")
+    if ProgressCallback:
+        ProgressCallback(10, "Encoding...")
+
+    # 保存原工作目录
+    OrigCwd = os.getcwd()
+    TempDir = None
+
     try:
-        Result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(VideoPath)],
-            capture_output=True, text=True
-        )
-        return float(Result.stdout.strip())
-    except:
-        return 0.0
+        # 复制字幕到临时目录，然后 chdir 到该目录（避免路径问题）
+        TempDir = Path(tempfile.mkdtemp())
+        TempSrt = TempDir / "sub.srt"
+        shutil.copy(SubtitlePath, TempSrt)
+
+        # 切换到临时目录，字幕用相对路径（videotrans 的做法）
+        os.chdir(TempDir)
+
+        # 构建 ffmpeg 参数（不包含 ffmpeg 本身，runffmpeg 会自动添加）
+        Cmd = [
+            "-y",
+            "-i", Path(VideoPath).as_posix(),
+            "-i", Path(AudioPath).as_posix(),
+            "-map", "0:v",
+            "-map", "1:a",
+            "-vf", "subtitles=sub.srt:charenc=utf-8",
+            "-c:v", f"libx{config.settings.get('video_codec', '264')}",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-crf", f"{config.settings.get('crf', 23)}",
+            "-preset", config.settings.get('preset', 'fast'),
+            "-movflags", "+faststart",
+            "-shortest",
+            Path(OutputPath).as_posix()
+        ]
+
+        Log(f"MergeWithHardSubtitle: Running ffmpeg (video re-encoding)...")
+
+        # 调用 videotrans 的 runffmpeg（自动处理硬件编码器和回退）
+        Result = runffmpeg(Cmd)
+
+        if ProgressCallback:
+            ProgressCallback(100, "Done")
+
+        if OutputPath.exists():
+            Log(f"MergeWithHardSubtitle: Done -> {OutputPath}")
+            return True
+        else:
+            Log(f"MergeWithHardSubtitle: Output not created")
+            return False
+
+    except Exception as E:
+        import traceback
+        Log(f"MergeWithHardSubtitle error: {E}")
+        Log(traceback.format_exc())
+        return False
+
+    finally:
+        # 恢复工作目录
+        os.chdir(OrigCwd)
+        # 清理临时文件
+        if TempDir and TempDir.exists():
+            shutil.rmtree(TempDir, ignore_errors=True)
 
 
 def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
                     ProgressCallback=None) -> bool:
     """
-    将视频和音频合并，替换原视频的音频轨道
-    VideoPath: 原视频路径
-    AudioPath: 配音音频路径
-    OutputPath: 输出视频路径
-    ProgressCallback: 进度回调 (percent, text)
-    返回是否成功
+    将视频和音频合并，替换原视频的音频轨道（无字幕）
+    调用 videotrans 的 runffmpeg 接口
     """
+    from videotrans.util.help_ffmpeg import runffmpeg
+
     if not VideoPath.exists():
         Log(f"MergeVideoAudio: Video not found: {VideoPath}")
         return False
@@ -54,42 +126,23 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         ProgressCallback(10, "Merging...")
 
     try:
-        # 获取视频时长用于进度估算
-        Duration = GetVideoDuration(VideoPath)
-
-        # ffmpeg 命令：替换音频
-        # -map 0:v 取第一个输入的视频流
-        # -map 1:a 取第二个输入的音频流
-        # -c:v copy 视频流直接复制（不重新编码）
-        # -c:a aac 音频编码为 AAC
-        # -shortest 以较短的流为准
+        # 构建 ffmpeg 参数
         Cmd = [
-            "ffmpeg", "-y",
-            "-i", str(VideoPath),
-            "-i", str(AudioPath),
+            "-y",
+            "-i", Path(VideoPath).as_posix(),
+            "-i", Path(AudioPath).as_posix(),
             "-map", "0:v",
             "-map", "1:a",
             "-c:v", "copy",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-movflags", "+faststart",
             "-shortest",
-            str(OutputPath)
+            Path(OutputPath).as_posix()
         ]
 
-        # 运行 ffmpeg
-        Process = subprocess.Popen(
-            Cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-
-        # 读取输出（ffmpeg 输出到 stderr）
-        _, Stderr = Process.communicate()
-
-        if Process.returncode != 0:
-            Log(f"MergeVideoAudio: ffmpeg error: {Stderr[-500:]}")
-            return False
+        # 调用 videotrans 的 runffmpeg
+        Result = runffmpeg(Cmd)
 
         if ProgressCallback:
             ProgressCallback(100, "Done")
@@ -108,83 +161,8 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         return False
 
 
-def MergeWithSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
-                      OutputPath: Path, ProgressCallback=None) -> bool:
-    """
-    将视频、音频和字幕合并（软字幕，可切换）
-    VideoPath: 原视频路径
-    AudioPath: 配音音频路径
-    SubtitlePath: 字幕路径（.srt）
-    OutputPath: 输出视频路径（.mkv 支持软字幕）
-    ProgressCallback: 进度回调 (percent, text)
-    返回是否成功
-    """
-    if not VideoPath.exists():
-        Log(f"MergeWithSubtitle: Video not found: {VideoPath}")
-        return False
-
-    if not AudioPath.exists():
-        Log(f"MergeWithSubtitle: Audio not found: {AudioPath}")
-        return False
-
-    if not SubtitlePath.exists():
-        Log(f"MergeWithSubtitle: Subtitle not found: {SubtitlePath}")
-        return False
-
-    Log(f"MergeWithSubtitle: Merging video, audio and subtitle...")
-    if ProgressCallback:
-        ProgressCallback(10, "Merging...")
-
-    try:
-        # ffmpeg 命令：合并视频、音频和软字幕
-        Cmd = [
-            "ffmpeg", "-y",
-            "-i", str(VideoPath),
-            "-i", str(AudioPath),
-            "-i", str(SubtitlePath),
-            "-map", "0:v",
-            "-map", "1:a",
-            "-map", "2:s",
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-c:s", "srt",
-            "-shortest",
-            str(OutputPath)
-        ]
-
-        Process = subprocess.Popen(
-            Cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-
-        _, Stderr = Process.communicate()
-
-        if Process.returncode != 0:
-            Log(f"MergeWithSubtitle: ffmpeg error: {Stderr[-500:]}")
-            return False
-
-        if ProgressCallback:
-            ProgressCallback(100, "Done")
-
-        if OutputPath.exists():
-            Log(f"MergeWithSubtitle: Done -> {OutputPath}")
-            return True
-        else:
-            Log(f"MergeWithSubtitle: Output not created")
-            return False
-
-    except Exception as E:
-        import traceback
-        Log(f"MergeWithSubtitle error: {E}")
-        Log(traceback.format_exc())
-        return False
-
-
 def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
-               OutputPath: Path = None, EmbedSubtitle: bool = False,
+               OutputPath: Path = None, HardSubtitle: bool = True,
                ProgressCallback=None) -> Path | None:
     """
     合成最终视频
@@ -192,7 +170,7 @@ def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
     AudioPath: 配音音频路径
     SubtitlePath: 字幕路径（可选）
     OutputPath: 输出视频路径，默认为同目录下 output.mp4
-    EmbedSubtitle: 是否嵌入软字幕（需要 .mkv 格式）
+    HardSubtitle: 是否烧录硬字幕（默认 True）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的视频文件路径
     """
@@ -204,16 +182,15 @@ def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
         Log(f"MergeVideo: Output already exists: {OutputPath}")
         return OutputPath
 
-    if EmbedSubtitle and SubtitlePath and SubtitlePath.exists():
-        # 嵌入软字幕（输出 mkv）
-        MkvPath = OutputPath.with_suffix(".mkv")
-        Success = MergeWithSubtitle(VideoPath, AudioPath, SubtitlePath, MkvPath, ProgressCallback)
+    if HardSubtitle and SubtitlePath and SubtitlePath.exists():
+        # 烧录硬字幕（字幕永久嵌入画面）
+        Success = MergeWithHardSubtitle(VideoPath, AudioPath, SubtitlePath, OutputPath, ProgressCallback)
         if Success:
-            return MkvPath
+            return OutputPath
         else:
             return None
     else:
-        # 只替换音频
+        # 只替换音频（无字幕）
         Success = MergeVideoAudio(VideoPath, AudioPath, OutputPath, ProgressCallback)
         if Success:
             return OutputPath

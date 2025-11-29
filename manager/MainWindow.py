@@ -233,7 +233,7 @@ class ProcessThread(QThread):
 
                 try:
                     Result = MergeVideo(VideoPath, ZhAudioPath, ZhSrtPath, OutputPath,
-                                        ProgressCallback=OnMergeProgress)
+                                        HardSubtitle=True, ProgressCallback=OnMergeProgress)
                     if not Result:
                         Log(f"Merge failed: {VideoPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
