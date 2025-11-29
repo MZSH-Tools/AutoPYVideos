@@ -60,14 +60,17 @@ def ParseSrt(SrtPath: Path) -> list[dict]:
 
 
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
-                    Voice: str = "zh-CN-XiaoxiaoNeural", VoiceAutorate: bool = True,
+                    Voice: str = "晓晓 多语言(Female/CN)", VideoPath: Path = None,
+                    VoiceAutorate: bool = False, VideoSlowdown: bool = True,
                     ProgressCallback=None) -> Path | None:
     """
     使用 videotrans 的 tts.run 接口根据字幕生成配音音频，并使用 SpeedRate 对齐
     SrtPath: 输入字幕路径
     OutputPath: 输出音频路径，默认为同目录下 zh-cn.wav
-    Voice: edge-tts 声音显示名称（如 晓晨 多语言(Female/CN)）
-    VoiceAutorate: 是否启用配音自动加速对齐（默认 True）
+    Voice: edge-tts 声音显示名称（如 晓晓 多语言(Female/CN)）
+    VideoPath: 原视频路径（视频慢速时需要）
+    VoiceAutorate: 是否启用配音自动加速对齐（默认 False）
+    VideoSlowdown: 是否启用视频慢速对齐（默认 True）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的音频文件路径
     """
@@ -111,7 +114,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     # 获取全局代理设置
     UseProxy = config.proxy if config.proxy else None
     Log(f"GenerateDubbing: Using proxy: {UseProxy}")
-    Log(f"GenerateDubbing: Voice autorate: {VoiceAutorate}")
+    Log(f"GenerateDubbing: Voice autorate: {VoiceAutorate}, Video slowdown: {VideoSlowdown}")
 
     if ProgressCallback:
         ProgressCallback(10, "Generating TTS...")
@@ -160,7 +163,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
             if SuccessCount == 0:
                 Log(f"GenerateDubbing: videotrans produced no audio, falling back...")
                 Result = _GenerateDubbingDirect(Subtitles, OutputPath, VoiceId, UseProxy,
-                                              CacheDir, VoiceAutorate, ProgressCallback)
+                                              CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback)
             else:
                 Log(f"GenerateDubbing: Generated {SuccessCount}/{len(QueueTts)} audio segments")
 
@@ -168,13 +171,14 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                     ProgressCallback(60, "Aligning audio...")
 
                 # 使用 SpeedRate 进行音频对齐和合并
-                Result = _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VoiceAutorate, ProgressCallback)
+                Result = _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VideoPath,
+                                            VoiceAutorate, VideoSlowdown, ProgressCallback)
 
         except Exception as TtsErr:
             Log(f"GenerateDubbing: tts.run failed: {TtsErr}")
             Log(f"GenerateDubbing: Falling back to direct edge-tts...")
             Result = _GenerateDubbingDirect(Subtitles, OutputPath, VoiceId, UseProxy,
-                                          CacheDir, VoiceAutorate, ProgressCallback)
+                                          CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback)
 
         # 无论成功失败，都清理缓存目录
         if CacheDir.exists():
@@ -206,7 +210,8 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 
 
 def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
-                           Proxy: str, CacheDir: Path, VoiceAutorate: bool,
+                           Proxy: str, CacheDir: Path, VideoPath: Path,
+                           VoiceAutorate: bool, VideoSlowdown: bool,
                            ProgressCallback) -> Path | None:
     """直接使用 edge-tts 库生成配音（备用方案）"""
     import asyncio
@@ -265,17 +270,18 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
     if ProgressCallback:
         ProgressCallback(60, "Aligning audio...")
 
-    return _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VoiceAutorate, ProgressCallback)
+    return _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VideoPath,
+                               VoiceAutorate, VideoSlowdown, ProgressCallback)
 
 
-def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path,
-                        VoiceAutorate: bool, ProgressCallback) -> Path | None:
+def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path, VideoPath: Path,
+                        VoiceAutorate: bool, VideoSlowdown: bool, ProgressCallback) -> Path | None:
     """使用 videotrans 的 SpeedRate 对齐并合并音频"""
     import copy
     from videotrans.task._rate import SpeedRate
     from videotrans.configure import config
 
-    Log(f"_AlignAndMergeAudio: Aligning {len(QueueTts)} segments (autorate={VoiceAutorate})...")
+    Log(f"_AlignAndMergeAudio: Aligning {len(QueueTts)} segments (audiorate={VoiceAutorate}, videorate={VideoSlowdown})...")
 
     # 先检查音频文件是否存在
     for I, Item in enumerate(QueueTts):
@@ -293,16 +299,21 @@ def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path,
     RawTotalTime = QueueTts[-1]["end_time"] if QueueTts else 0
     Log(f"_AlignAndMergeAudio: Total time = {RawTotalTime}ms")
 
+    # 视频慢速需要原视频文件
+    NovoiceMp4 = str(VideoPath) if VideoSlowdown and VideoPath and VideoPath.exists() else None
+    if VideoSlowdown and not NovoiceMp4:
+        Log(f"_AlignAndMergeAudio: Video slowdown requested but no video file, disabling")
+
     try:
         # 使用 SpeedRate 进行对齐（使用副本，因为 SpeedRate 会修改 queue_tts）
         RateInst = SpeedRate(
             queue_tts=QueueTtsCopy,
-            shoud_audiorate=VoiceAutorate,  # 启用配音自动加速
-            shoud_videorate=False,           # 不使用视频慢速（我们没有视频）
+            shoud_audiorate=VoiceAutorate,
+            shoud_videorate=VideoSlowdown and NovoiceMp4 is not None,
             raw_total_time=RawTotalTime,
             target_audio=str(OutputPath),
             cache_folder=str(CacheDir),
-            novoice_mp4=None,                # 无视频文件
+            novoice_mp4=NovoiceMp4,
             remove_silent_mid=False,
             align_sub_audio=True
         )

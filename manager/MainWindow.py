@@ -140,15 +140,6 @@ class ProcessThread(QThread):
                 Log(f"Title translated: {TitleZh}")
                 self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
 
-        # 翻译简介附加（从全局设置读取，翻译后保存到任务）
-        DescExtra = LoadSettings().get("DescriptionExtra", "")
-        if Task and DescExtra and not Task.get("DescExtraZh"):
-            Log(f"Translating description extra...")
-            DescExtraZh = TranslateText(DescExtra, SourceLang="zh-cn", TargetLang="en")
-            if DescExtraZh:
-                Log(f"Description extra translated: {DescExtraZh}")
-                self.TaskMgr.Update(self.Key, DescExtraZh=DescExtraZh)
-
         TaskDir = self.TaskMgr.GetTaskDir(self.Key)
         VideoPath = TaskDir / "video.mp4"
         AudioPath = TaskDir / "audio.wav"
@@ -293,7 +284,7 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "dubbing", 0)
 
                 try:
-                    Result = GenerateDubbing(ZhSrtPath, ZhAudioPath,
+                    Result = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
                                              ProgressCallback=OnDubbingProgress)
                     if not Result:
                         Log(f"Dubbing failed: {ZhSrtPath}")
@@ -845,8 +836,7 @@ class MainWindow(QMainWindow):
                 RawTitle = Task.get("Title") or ""
                 Author = Task.get("Author") or ""
                 Url = Task.get("Url") or ""
-                DescExtraZh = Task.get("DescExtraZh") or ""
-                self.UpdatePreview(TitleZh or RawTitle, Author, Url, DescExtraZh)
+                self.UpdatePreview(TitleZh or RawTitle, RawTitle, Author, Url)
 
     def UpdatePipelineDisplay(self, Key: str, Status: str, Progress: int):
         """更新流水线阶段显示（显示当前处理任务）"""
@@ -1051,33 +1041,35 @@ class MainWindow(QMainWindow):
         # 发布链接（可编辑）
         self.PublishUrlEdit.setText(PublishUrl)
 
-        # 更新发布预览（使用翻译后的标题和简介附加）
-        DescExtraZh = Task.get("DescExtraZh") or ""
-        self.UpdatePreview(TitleZh or RawTitle, RawAuthor, Url, DescExtraZh)
+        # 更新发布预览（标题用翻译后的，简介中的原标题用英文原标题）
+        self.UpdatePreview(TitleZh or RawTitle, RawTitle, RawAuthor, Url)
 
     def OnCopyUrl(self):
         """复制原链接到剪贴板"""
         if hasattr(self, "CurUrl") and self.CurUrl:
             QApplication.clipboard().setText(self.CurUrl)
 
-    def UpdatePreview(self, Title: str, Author: str, Url: str, DescExtraZh: str = ""):
-        """更新发布预览"""
+    def UpdatePreview(self, TitleZh: str, RawTitle: str, Author: str, Url: str):
+        """更新发布预览
+        TitleZh: 翻译后的中文标题（用于标题预览）
+        RawTitle: 英文原标题（用于简介中的原标题）
+        """
         Settings = LoadSettings()
         Prefix = Settings.get("TitlePrefix", "")
         Suffix = Settings.get("TitleSuffix", "")
         DescExtra = Settings.get("DescriptionExtra", "")
 
-        # 标题预览：前缀 + 原标题 + 后缀（如果没有标题则显示提示）
-        if Title:
-            PreviewTitle = f"{Prefix}{Title}{Suffix}"
+        # 标题预览：前缀 + 中文标题 + 后缀
+        if TitleZh:
+            PreviewTitle = f"{Prefix}{TitleZh}{Suffix}"
         else:
             PreviewTitle = "(标题加载中...)"
         self.TitlePreview.setText(PreviewTitle)
 
-        # 简介预览：原标题、原作者、原链接 + 简介附加（优先用翻译后的）
+        # 简介预览：原标题（英文）、原作者、原链接 + 简介附加
         DescLines = []
-        if Title:
-            DescLines.append(f"原标题: {Title}")
+        if RawTitle:
+            DescLines.append(f"原标题: {RawTitle}")
         else:
             DescLines.append("原标题: (加载中...)")
         if Author:
@@ -1086,11 +1078,10 @@ class MainWindow(QMainWindow):
             DescLines.append("原作者: (加载中...)")
         if Url:
             DescLines.append(f"原链接: {Url}")
-        # 简介附加：优先使用翻译后的，否则用原始的
-        ActualDescExtra = DescExtraZh or DescExtra
-        if ActualDescExtra:
+        # 简介附加：直接使用用户输入的内容
+        if DescExtra:
             DescLines.append("")
-            DescLines.append(ActualDescExtra)
+            DescLines.append(DescExtra)
         self.DescPreview.setPlainText("\n".join(DescLines))
 
     def OnCopyTitle(self):

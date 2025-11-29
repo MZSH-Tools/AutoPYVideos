@@ -112,7 +112,6 @@ class TaskManager:
             "Thumbnail": "",
             "VideoId": "",
             "PublishUrl": "",
-            "DescExtraZh": "",  # 翻译后的简介附加（从全局设置翻译而来）
             "Error": "",
             "Status": TaskStatus.Queued.value,
             "Progress": 0,
@@ -178,7 +177,7 @@ class TaskManager:
                 V = V.value
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
-            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "DescExtraZh"]:
+            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url"]:
                 NeedSave = True
         if NeedSave:
             self.SaveTask(Key)
