@@ -166,6 +166,10 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         # 构建 videotrans tts 格式的 queue_tts
         # 注意：role 要用 VoiceId（如 zh-CN-XiaochenMultilingualNeural），不是显示名称
         # 注意：filename 必须包含 .wav 后缀，因为 SpeedRate 直接使用这个路径加载文件
+        # 从配置读取语速设置
+        VoiceRate = config.settings.get("voice_rate", "+0%")
+        Log(f"GenerateDubbing: Voice rate = {VoiceRate}")
+
         QueueTts = []
         for I, Sub in enumerate(Subtitles):
             QueueTts.append({
@@ -175,6 +179,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                 "start_time": int(Sub["start"] * 1000),
                 "end_time": int(Sub["end"] * 1000),
                 "line": I + 1,  # SpeedRate 需要 line 字段
+                "rate": VoiceRate,  # 语速设置
             })
 
         Log(f"GenerateDubbing: Calling tts.run with {len(QueueTts)} items")

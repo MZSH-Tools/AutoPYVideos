@@ -264,10 +264,10 @@ def parse_init(update_data=None):
         "vad": True,
         
         "threshold": 0.45,
-        "min_speech_duration_ms": 500,
+        "min_speech_duration_ms": 1000,
         "max_speech_duration_s": 10,
-        "min_silence_duration_ms": 3000,
-        "speech_pad_ms": 0,
+        "min_silence_duration_ms": 1000,
+        "speech_pad_ms": 200,
         "rephrase": False,
         "trans_thread": 20,
         "aitrans_thread": 25,
@@ -467,7 +467,7 @@ def getset_params(obj=None):
         "video_autorate": False,
         "auto_fix":False,#自动校正语音转录结果字幕
         "voice_role": "No",
-        "voice_rate": "+25%",
+        "voice_rate": "+100%",
         "deepl_authkey": "",
         "deepl_api": "",
         "deepl_gid": "",

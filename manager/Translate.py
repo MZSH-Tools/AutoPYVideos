@@ -249,19 +249,29 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         # 转换为 videotrans 格式：[{"text": "...", "line": 1}, ...]
         TextList = [{"text": Sub["text"], "line": Sub["line"]} for Sub in Subtitles]
 
-        # 调用 videotrans 翻译接口
-        try:
-            Result = translator.run(
-                translate_type=TranslateType,
-                text_list=TextList,
-                source_code=SourceLang,
-                target_code=TargetLang
-            )
-        except Exception as TransErr:
-            Log(f"TranslateSrt: translator.run exception: {TransErr}")
-            import traceback
-            Log(traceback.format_exc())
-            return None
+        # 调用 videotrans 翻译接口（带重试机制，无限重试）
+        import time
+        RetryDelay = 2  # 秒
+        MaxDelay = 10  # 最大间隔
+        Attempt = 0
+        Result = None
+
+        while True:
+            Attempt += 1
+            try:
+                Result = translator.run(
+                    translate_type=TranslateType,
+                    text_list=TextList,
+                    source_code=SourceLang,
+                    target_code=TargetLang
+                )
+                if Result:
+                    break
+            except Exception as TransErr:
+                Log(f"TranslateSrt: Attempt {Attempt} failed: {TransErr}")
+                Log(f"TranslateSrt: Retrying in {RetryDelay} seconds...")
+                time.sleep(RetryDelay)
+                RetryDelay = min(RetryDelay * 2, MaxDelay)  # 指数退避，最大60秒
 
         if not Result:
             Log(f"TranslateSrt: Translation returned empty result")
