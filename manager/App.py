@@ -5,12 +5,15 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtCore import QObject, Signal
 
-# 优先使用 winget 安装的 ffmpeg（带 libx264）
-FFMPEG_PATH = os.path.expanduser(
-    r"~\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
-)
-if os.path.exists(FFMPEG_PATH):
-    os.environ["PATH"] = FFMPEG_PATH + os.pathsep + os.environ.get("PATH", "")
+# 配置 FFmpeg 路径（跨平台）
+if sys.platform == "win32":
+    # Windows: 优先使用 winget 安装的 ffmpeg（带 libx264）
+    FFMPEG_PATH = os.path.expanduser(
+        r"~\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
+    )
+    if os.path.exists(FFMPEG_PATH):
+        os.environ["PATH"] = FFMPEG_PATH + os.pathsep + os.environ.get("PATH", "")
+# macOS/Linux: ffmpeg 通常已在 PATH 中（brew install ffmpeg / apt install ffmpeg）
 
 # 加载项目配置并应用到 videotrans
 import Config
