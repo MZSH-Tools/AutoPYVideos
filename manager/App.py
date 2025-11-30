@@ -12,6 +12,10 @@ FFMPEG_PATH = os.path.expanduser(
 if os.path.exists(FFMPEG_PATH):
     os.environ["PATH"] = FFMPEG_PATH + os.pathsep + os.environ.get("PATH", "")
 
+# 加载项目配置并应用到 videotrans
+import Config
+Config.ApplyToVideotrans()
+
 from Tray import TrayIcon
 
 

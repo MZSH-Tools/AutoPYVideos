@@ -135,7 +135,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     UseProxy = config.proxy if config.proxy else None
 
     Log(f"配音: {len(Subtitles)} 条字幕")
-    Log(f"配音: 声音={Voice}, 语速={VoiceRate}")
+    Log(f"配音: 声音={Voice}, 语速={VoiceRate} (from config.params)")
     Log(f"配音: 音频加速={VoiceAutorate}, 视频慢放={VideoSlowdown}")
 
     # 创建缓存目录

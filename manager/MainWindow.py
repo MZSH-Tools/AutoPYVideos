@@ -13,6 +13,7 @@ from pathlib import Path
 from Task import TaskManager, TaskStatus
 from Storage import LoadSettings, SaveSettings
 from Extract import ExtractAudio
+import Config
 import Recognize
 from Recognize import RecognizeAudio
 import Translate
@@ -219,7 +220,10 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "recognizing", 0)
 
                 try:
+                    Model = Config.Get("语音识别.模型", "medium.en")
+                    Log(f"配置: 识别模型={Model}")
                     Result = RecognizeAudio(AudioPath, EnSrtPath, Language="en",
+                                            Model=Model,
                                             ProgressCallback=OnRecognizeProgress)
                     if not Result:
                         Log(f"识别失败: {AudioPath}")
@@ -285,7 +289,14 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "dubbing", 0)
 
                 try:
+                    Voice = Config.Get("配音.声音角色", "晓晓 多语言(Female/CN)")
+                    VoiceAutorate = Config.Get("配音.音频加速", False)
+                    VideoSlowdown = Config.Get("配音.视频慢放", True)
+                    Log(f"配置: 声音={Voice}, 音频加速={VoiceAutorate}, 视频慢放={VideoSlowdown}")
                     DubbingResult = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
+                                                    Voice=Voice,
+                                                    VoiceAutorate=VoiceAutorate,
+                                                    VideoSlowdown=VideoSlowdown,
                                                     ProgressCallback=OnDubbingProgress)
                     if not DubbingResult:
                         Log(f"配音失败: {ZhSrtPath}")
