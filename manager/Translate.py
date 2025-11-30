@@ -1,80 +1,7 @@
 # 字幕翻译模块（调用 videotrans 的 translator 接口）
-import re
 from pathlib import Path
-
-# 日志回调（由 MainWindow 设置）
-LogFunc = None
-
-def SetLogFunc(Func):
-    """设置日志函数"""
-    global LogFunc
-    LogFunc = Func
-
-def Log(Msg: str):
-    """输出日志"""
-    if LogFunc:
-        LogFunc(Msg)
-    else:
-        print(Msg)
-
-
-def ParseSrt(SrtPath: Path) -> list[dict]:
-    """
-    解析 SRT 字幕文件
-    返回 [{line, start, end, text}, ...]
-    """
-    if not SrtPath.exists():
-        return []
-
-    Content = SrtPath.read_text(encoding="utf-8")
-    Blocks = re.split(r"\n\s*\n", Content.strip())
-    Result = []
-
-    for Block in Blocks:
-        Lines = Block.strip().split("\n")
-        if len(Lines) < 3:
-            continue
-
-        # 行号
-        try:
-            LineNum = int(Lines[0].strip())
-        except ValueError:
-            continue
-
-        # 时间轴
-        TimeMatch = re.match(
-            r"(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})",
-            Lines[1].strip()
-        )
-        if not TimeMatch:
-            continue
-
-        # 字幕文本（可能多行）
-        Text = "\n".join(Lines[2:]).strip()
-
-        Result.append({
-            "line": LineNum,
-            "start": TimeMatch.group(1),
-            "end": TimeMatch.group(2),
-            "text": Text
-        })
-
-    return Result
-
-
-def WriteSrt(Subtitles: list[dict], OutputPath: Path):
-    """
-    写入 SRT 字幕文件
-    Subtitles: [{line, start, end, text}, ...]
-    """
-    Lines = []
-    for I, Sub in enumerate(Subtitles, 1):
-        Lines.append(str(I))
-        Lines.append(f"{Sub['start']} --> {Sub['end']}")
-        Lines.append(Sub["text"])
-        Lines.append("")
-
-    OutputPath.write_text("\n".join(Lines), encoding="utf-8")
+from Log import Log
+import Srt
 
 
 def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path = None,
@@ -232,7 +159,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         return OutputSrt
 
     # 解析字幕
-    Subtitles = ParseSrt(InputSrt)
+    Subtitles = Srt.Parse(InputSrt)
     if not Subtitles:
         Log(f"翻译字幕: 无字幕内容: {InputSrt}")
         return None
@@ -296,7 +223,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
             })
 
         # 写入文件
-        WriteSrt(Translated, OutputSrt)
+        Srt.Write(Translated, OutputSrt)
 
         if ProgressCallback:
             ProgressCallback(100, "完成")

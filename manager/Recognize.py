@@ -1,21 +1,7 @@
 # 语音识别模块（调用 videotrans 的 recognition 接口）
 import tempfile
 from pathlib import Path
-
-# 日志回调（由 MainWindow 设置）
-LogFunc = None
-
-def SetLogFunc(Func):
-    """设置日志函数"""
-    global LogFunc
-    LogFunc = Func
-
-def Log(Msg: str):
-    """输出日志"""
-    if LogFunc:
-        LogFunc(Msg)
-    else:
-        print(Msg)
+from Log import Log
 
 
 def FormatSrtTime(Seconds: float) -> str:

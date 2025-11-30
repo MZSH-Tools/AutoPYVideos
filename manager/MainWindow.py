@@ -12,15 +12,12 @@ from PySide6.QtGui import QCloseEvent, QColor
 from pathlib import Path
 from Task import TaskManager, TaskStatus
 from Storage import LoadSettings, SaveSettings
+import Log as LogModule
 from Extract import ExtractAudio
 import Config
-import Recognize
 from Recognize import RecognizeAudio
-import Translate
 from Translate import TranslateSrt, MergeBilingualSrt, TranslateText
-import Dubbing
 from Dubbing import GenerateDubbing
-import Merge
 from Merge import MergeVideo
 
 
@@ -64,11 +61,8 @@ def LogDebug(Msg: str):
     LogEmitter.Message.emit("", Msg, True)
 
 
-# 设置模块日志函数
-Recognize.SetLogFunc(Log)
-Translate.SetLogFunc(Log)
-Dubbing.SetLogFunc(Log)
-Merge.SetLogFunc(Log)
+# 设置公共日志模块的回调函数
+LogModule.SetLogFunc(Log)
 
 
 class LogWriter:
@@ -224,7 +218,6 @@ class ProcessThread(QThread):
                     Language = Config.Get("语音识别.源语言", "en")
                     AutoFix = Config.Get("语音识别.自动修正", False)
                     UseCuda = Config.Get("处理.启用CUDA", False)
-                    Log(f"配置: 模型={Model}, 语言={Language}, 自动修正={AutoFix}, CUDA={UseCuda}")
                     Result = RecognizeAudio(AudioPath, EnSrtPath, Language=Language,
                                             Model=Model, AutoFix=AutoFix, UseCuda=UseCuda,
                                             ProgressCallback=OnRecognizeProgress)

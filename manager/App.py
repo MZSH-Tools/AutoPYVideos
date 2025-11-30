@@ -33,7 +33,6 @@ class SingleInstanceServer(QObject):
 
     def Start(self):
         """启动服务器"""
-        # 先尝试清理可能残留的服务器
         QLocalServer.removeServer(SERVER_NAME)
         if not self.Server.listen(SERVER_NAME):
             print(f"Failed to start server: {self.Server.errorString()}")
@@ -52,7 +51,7 @@ class SingleInstanceServer(QObject):
 
 
 def TryWakeExisting() -> bool:
-    """尝试唤醒已存在的实例，返回是否成功"""
+    """尝试唤醒已存在的实例"""
     Socket = QLocalSocket()
     Socket.connectToServer(SERVER_NAME)
     if Socket.waitForConnected(500):
@@ -63,35 +62,8 @@ def TryWakeExisting() -> bool:
     return False
 
 
-class ManagerApp:
-    """后台管理程序"""
-
-    def __init__(self):
-        self.App = None
-        self.Tray = None
-        self.Server = None
-
-    def Run(self):
-        """启动程序"""
-        self.App = QApplication(sys.argv)
-        self.App.setQuitOnLastWindowClosed(False)
-
-        # 启动单实例服务器
-        self.Server = SingleInstanceServer()
-        if not self.Server.Start():
-            return 1
-
-        self.Tray = TrayIcon(self.App)
-
-        # 连接唤醒信号
-        self.Server.ShowWindowRequested.connect(self.Tray.ShowMainWindow)
-
-        return self.App.exec()
-
-
 def Main():
     """入口函数"""
-    # 先创建 QApplication（QLocalSocket 需要）
     App = QApplication(sys.argv)
 
     # 尝试唤醒已存在的实例
@@ -99,18 +71,14 @@ def Main():
         print("Waking existing instance...")
         sys.exit(0)
 
-    # 没有已存在的实例，正常启动
     App.setQuitOnLastWindowClosed(False)
 
-    Manager = ManagerApp()
-    Manager.App = App
-
     # 启动单实例服务器
-    Manager.Server = SingleInstanceServer()
-    if not Manager.Server.Start():
+    Server = SingleInstanceServer()
+    if not Server.Start():
         sys.exit(1)
 
-    Manager.Tray = TrayIcon(App)
-    Manager.Server.ShowWindowRequested.connect(Manager.Tray.ShowMainWindow)
+    Tray = TrayIcon(App)
+    Server.ShowWindowRequested.connect(Tray.ShowMainWindow)
 
     sys.exit(App.exec())

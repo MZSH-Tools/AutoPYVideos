@@ -1,72 +1,9 @@
 # 配音模块（调用 videotrans 的 tts 和 SpeedRate 接口）
-import re
 import shutil
 import copy
 from pathlib import Path
-
-# 日志回调（由 MainWindow 设置）
-LogFunc = None
-
-def SetLogFunc(Func):
-    """设置日志函数"""
-    global LogFunc
-    LogFunc = Func
-
-def Log(Msg: str):
-    """输出日志"""
-    if LogFunc:
-        LogFunc(Msg)
-    else:
-        print(Msg)
-
-
-def ParseSrtTime(TimeStr: str) -> float:
-    """将 SRT 时间格式转换为秒数"""
-    Match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})", TimeStr)
-    if not Match:
-        return 0.0
-    Hours, Minutes, Seconds, Millis = Match.groups()
-    return int(Hours) * 3600 + int(Minutes) * 60 + int(Seconds) + int(Millis) / 1000
-
-
-def FormatSrtTime(Ms: int) -> str:
-    """将毫秒转换为 SRT 时间格式 HH:MM:SS,mmm"""
-    Hours = Ms // 3600000
-    Minutes = (Ms % 3600000) // 60000
-    Seconds = (Ms % 60000) // 1000
-    Millis = Ms % 1000
-    return f"{Hours:02d}:{Minutes:02d}:{Seconds:02d},{Millis:03d}"
-
-
-def ParseSrt(SrtPath: Path) -> list[dict]:
-    """解析 SRT 字幕文件，返回 [{start, end, text}, ...]"""
-    if not SrtPath.exists():
-        return []
-
-    Content = SrtPath.read_text(encoding="utf-8")
-    Blocks = re.split(r"\n\s*\n", Content.strip())
-    Result = []
-
-    for Block in Blocks:
-        Lines = Block.strip().split("\n")
-        if len(Lines) < 3:
-            continue
-
-        TimeMatch = re.match(
-            r"(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})",
-            Lines[1].strip()
-        )
-        if not TimeMatch:
-            continue
-
-        Text = " ".join(Lines[2:]).strip()
-        Result.append({
-            "start": ParseSrtTime(TimeMatch.group(1)),
-            "end": ParseSrtTime(TimeMatch.group(2)),
-            "text": Text
-        })
-
-    return Result
+from Log import Log
+import Srt
 
 
 def _GenerateAlignedSrt(QueueTts: list, OutputDir: Path) -> Path | None:
@@ -78,8 +15,8 @@ def _GenerateAlignedSrt(QueueTts: list, OutputDir: Path) -> Path | None:
         Text = Item.get("text", "").strip()
         if not Text:
             continue
-        StartTime = FormatSrtTime(Item.get("start_time", 0))
-        EndTime = FormatSrtTime(Item.get("end_time", 0))
+        StartTime = Srt.FormatTimeMs(Item.get("start_time", 0))
+        EndTime = Srt.FormatTimeMs(Item.get("end_time", 0))
         Lines.append(str(Idx + 1))
         Lines.append(f"{StartTime} --> {EndTime}")
         Lines.append(Text)
@@ -122,7 +59,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         return (OutputPath, AlignedSrtPath) if AlignedSrtPath.exists() else (OutputPath, None)
 
     # 解析字幕
-    Subtitles = ParseSrt(SrtPath)
+    Subtitles = Srt.Parse(SrtPath)
     if not Subtitles:
         raise ValueError(f"字幕文件无内容: {SrtPath}")
 
@@ -160,8 +97,8 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                 "text": Sub["text"],
                 "role": Voice,
                 "filename": str(CacheDir / f"seg_{I:04d}.wav"),
-                "start_time": int(Sub["start"] * 1000),
-                "end_time": int(Sub["end"] * 1000),
+                "start_time": int(Sub["start_sec"] * 1000),
+                "end_time": int(Sub["end_sec"] * 1000),
                 "line": I + 1,
                 "rate": VoiceRate,
             })

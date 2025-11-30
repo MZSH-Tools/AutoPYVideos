@@ -3,21 +3,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-
-# 日志回调（由 MainWindow 设置）
-LogFunc = None
-
-def SetLogFunc(Func):
-    """设置日志函数"""
-    global LogFunc
-    LogFunc = Func
-
-def Log(Msg: str):
-    """输出日志"""
-    if LogFunc:
-        LogFunc(Msg)
-    else:
-        print(Msg)
+from Log import Log
 
 
 def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
