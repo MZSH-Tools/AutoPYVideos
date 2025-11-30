@@ -97,6 +97,7 @@ def _GenerateAlignedSrt(QueueTts: list, OutputDir: Path) -> Path | None:
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                     Voice: str = "晓晓 多语言(Female/CN)", VideoPath: Path = None,
                     VoiceAutorate: bool = False, VideoSlowdown: bool = True,
+                    RemoveSilentMid: bool = False, AlignSubAudio: bool = True,
                     ProgressCallback=None) -> tuple[Path, Path] | None:
     """
     使用 videotrans 的 tts.run 接口生成配音音频，并使用 SpeedRate 对齐时间轴
@@ -212,8 +213,8 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
             target_audio=str(OutputPath),
             cache_folder=str(CacheDir),
             novoice_mp4=NovoiceMp4,
-            remove_silent_mid=False,
-            align_sub_audio=True
+            remove_silent_mid=RemoveSilentMid,
+            align_sub_audio=AlignSubAudio
         )
 
         if ProgressCallback:

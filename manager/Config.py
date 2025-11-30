@@ -46,19 +46,30 @@ def ApplyToVideotrans():
     # settings: 高级设置（VAD 参数、字幕长度等）
 
     ParamsMapping = {
-        # 配音
-        "配音.声音角色": "voice_role",
-        "配音.语速": "voice_rate",
-        "配音.音频加速": "voice_autorate",
-        "配音.视频慢放": "video_autorate",
         # 语音识别
+        "语音识别.识别渠道": "recogn_type",
         "语音识别.模型": "model_name",
         "语音识别.源语言": "source_language_code",
+        "语音识别.分割类型": "split_type",
+        "语音识别.自动修正": "auto_fix",
+        "语音识别.噪音消除": "remove_noise",
         # 翻译
-        "翻译.目标语言": "target_language_code",
         "翻译.翻译引擎": "translate_type",
+        "翻译.目标语言": "target_language_code",
+        # 配音
+        "配音.配音渠道": "tts_type",
+        "配音.声音角色": "voice_role",
+        "配音.语速": "voice_rate",
+        "配音.音量": "volume",
+        "配音.音调": "pitch",
+        "配音.音频加速": "voice_autorate",
+        "配音.视频慢放": "video_autorate",
         # 字幕
         "字幕.字幕类型": "subtitle_type",
+        # 处理
+        "处理.删除间隙静音": "remove_silent_mid",
+        "处理.对齐字幕音频": "align_sub_audio",
+        "处理.启用CUDA": "cuda",
     }
 
     SettingsMapping = {
@@ -69,6 +80,7 @@ def ApplyToVideotrans():
         "语音识别.语音填充_毫秒": "speech_pad_ms",
         "语音识别.阈值": "threshold",
         "语音识别.启用VAD": "vad",
+        "语音识别.LLM重新断句": "rephrase",
         # 字幕
         "字幕.中日韩每行字数": "cjk_len",
         "字幕.其他每行字数": "other_len",

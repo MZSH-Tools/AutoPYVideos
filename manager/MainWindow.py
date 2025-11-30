@@ -221,9 +221,12 @@ class ProcessThread(QThread):
 
                 try:
                     Model = Config.Get("语音识别.模型", "medium.en")
-                    Log(f"配置: 识别模型={Model}")
-                    Result = RecognizeAudio(AudioPath, EnSrtPath, Language="en",
-                                            Model=Model,
+                    Language = Config.Get("语音识别.源语言", "en")
+                    AutoFix = Config.Get("语音识别.自动修正", False)
+                    UseCuda = Config.Get("处理.启用CUDA", False)
+                    Log(f"配置: 模型={Model}, 语言={Language}, 自动修正={AutoFix}, CUDA={UseCuda}")
+                    Result = RecognizeAudio(AudioPath, EnSrtPath, Language=Language,
+                                            Model=Model, AutoFix=AutoFix, UseCuda=UseCuda,
                                             ProgressCallback=OnRecognizeProgress)
                     if not Result:
                         Log(f"识别失败: {AudioPath}")
@@ -292,11 +295,16 @@ class ProcessThread(QThread):
                     Voice = Config.Get("配音.声音角色", "晓晓 多语言(Female/CN)")
                     VoiceAutorate = Config.Get("配音.音频加速", False)
                     VideoSlowdown = Config.Get("配音.视频慢放", True)
+                    RemoveSilentMid = Config.Get("处理.删除间隙静音", False)
+                    AlignSubAudio = Config.Get("处理.对齐字幕音频", True)
                     Log(f"配置: 声音={Voice}, 音频加速={VoiceAutorate}, 视频慢放={VideoSlowdown}")
+                    Log(f"配置: 删除间隙静音={RemoveSilentMid}, 对齐字幕音频={AlignSubAudio}")
                     DubbingResult = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
                                                     Voice=Voice,
                                                     VoiceAutorate=VoiceAutorate,
                                                     VideoSlowdown=VideoSlowdown,
+                                                    RemoveSilentMid=RemoveSilentMid,
+                                                    AlignSubAudio=AlignSubAudio,
                                                     ProgressCallback=OnDubbingProgress)
                     if not DubbingResult:
                         Log(f"配音失败: {ZhSrtPath}")
