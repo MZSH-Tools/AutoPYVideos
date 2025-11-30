@@ -1294,6 +1294,10 @@ class MainWindow(QMainWindow):
 
         Menu.addSeparator()
 
+        # 清理日志
+        ClearLogAction = Menu.addAction("清理日志")
+        ClearLogAction.triggered.connect(lambda: self.OnClearLog(Key))
+
         # 删除
         DeleteAction = Menu.addAction("删除任务")
         DeleteAction.triggered.connect(lambda: self.OnDeleteTask(Key))
@@ -1335,6 +1339,29 @@ class MainWindow(QMainWindow):
 
         if Reply != QMessageBox.StandardButton.Yes:
             return
+
+        # 如果正在处理这个任务，需要先停止
+        if CurrentProcessingKey == Key and self.ProcessThread and self.ProcessThread.isRunning():
+            Log(f"任务正在处理中，尝试停止...", Key)
+            # 设置 videotrans 退出标志，让识别/配音等操作尽快退出
+            from videotrans.configure import config
+            config.box_recogn = 'stop'
+            config.box_tts = 'stop'
+            # 清理可能残留的锁文件
+            import glob
+            LockFiles = glob.glob(config.TEMP_DIR + '/*.lock')
+            for LockFile in LockFiles:
+                try:
+                    Path(LockFile).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            config.model_process = None
+            # 等待线程结束（最多等待2秒）
+            self.ProcessThread.wait(2000)
+            if self.ProcessThread.isRunning():
+                Log(f"警告：无法正常停止任务，将强制终止", Key)
+                self.ProcessThread.terminate()
+                self.ProcessThread.wait(1000)
 
         Success = self.TaskMgr.Reset(Key, FromStage)
         if Success:
@@ -1383,6 +1410,17 @@ class MainWindow(QMainWindow):
         # 选中第一个任务
         if self.TaskList.count() > 0:
             self.TaskList.setCurrentRow(0)
+
+    def OnClearLog(self, Key: str):
+        """清理任务日志"""
+        TaskDir = self.TaskMgr.GetTaskDir(Key)
+        LogPath = TaskDir / "log.txt"
+        if LogPath.exists():
+            LogPath.write_text("", encoding="utf-8")
+            # 如果当前显示的是这个任务，刷新日志显示
+            if self.CurKey == Key:
+                self.LogText.clear()
+            Log(f"日志已清理", Key)
 
     def closeEvent(self, Event: QCloseEvent):
         """关闭窗口时隐藏而非退出"""

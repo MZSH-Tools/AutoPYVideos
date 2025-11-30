@@ -32,6 +32,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
     from videotrans import recognition
     from videotrans.configure import config
     from videotrans.util import tools
+    import glob
 
     if not AudioPath.exists():
         Log(f"语音识别: 音频文件不存在: {AudioPath}")
@@ -60,6 +61,16 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         config.box_recogn = 'ing'
         # 关闭 LLM 重新断句（使用整体识别的原始断句）
         config.settings['rephrase'] = 0
+
+        # 清理可能残留的锁文件和进程状态（解决识别卡住问题）
+        config.model_process = None
+        LockFiles = glob.glob(config.TEMP_DIR + '/*.lock')
+        for LockFile in LockFiles:
+            try:
+                Path(LockFile).unlink(missing_ok=True)
+                Log(f"语音识别: 清理残留锁文件 {LockFile}")
+            except Exception:
+                pass
 
         # 创建临时缓存目录
         CacheFolder = Path(tempfile.mkdtemp())
