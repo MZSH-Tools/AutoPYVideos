@@ -130,8 +130,8 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     if not VoiceId:
         raise ValueError(f"无效的声音名称: {Voice}")
 
-    # 读取配置
-    VoiceRate = config.settings.get("voice_rate", "+0%")
+    # 读取配置（voice_rate 在 params 中，不在 settings 中）
+    VoiceRate = config.params.get("voice_rate", "+0%")
     UseProxy = config.proxy if config.proxy else None
 
     Log(f"配音: {len(Subtitles)} 条字幕")
