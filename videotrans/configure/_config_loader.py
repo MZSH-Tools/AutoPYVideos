@@ -266,7 +266,7 @@ def parse_init(update_data=None):
         "threshold": 0.45,
         "min_speech_duration_ms": 500,
         "max_speech_duration_s": 10,
-        "min_silence_duration_ms": 500,
+        "min_silence_duration_ms": 3000,
         "speech_pad_ms": 0,
         "rephrase": False,
         "trans_thread": 20,
@@ -465,9 +465,9 @@ def getset_params(obj=None):
         "recogn_type": 0,  # 语音识别方式，数字代表显示顺序
         "voice_autorate": True,
         "video_autorate": False,
-        "auto_fix":True,#自动校正语音转录结果字幕
+        "auto_fix":False,#自动校正语音转录结果字幕
         "voice_role": "No",
-        "voice_rate": "0",
+        "voice_rate": "+25%",
         "deepl_authkey": "",
         "deepl_api": "",
         "deepl_gid": "",
