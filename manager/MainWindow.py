@@ -4,10 +4,10 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFrame, QSplitter, QApplication, QTextEdit
+    QLabel, QFrame, QSplitter, QApplication, QTextEdit, QMenu, QMessageBox
 )
 from PySide6.QtCore import Signal, Qt, QThread, QObject, QTimer
-from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtGui import QCloseEvent, QColor, QAction
 
 from pathlib import Path
 from Task import TaskManager, TaskStatus
@@ -97,7 +97,7 @@ class ProcessThread(QThread):
     """后台处理任务的线程（下载 → 识别 → 翻译 → 配音 → 合成）"""
     Progress = Signal(str, int, str, float)   # Key, Percent, Stage, Speed
     StageChanged = Signal(str, str)           # Key, Stage
-    Finished = Signal(str, bool)              # Key, Success
+    Finished = Signal(str, bool, bool)        # Key, Success, Preempted（是否被抢占）
 
     def __init__(self, TaskMgr: TaskManager, Key: str):
         super().__init__()
@@ -114,11 +114,22 @@ class ProcessThread(QThread):
         finally:
             CurrentProcessingKey = None
 
+    def _ShouldPreempt(self) -> bool:
+        """检查是否应该被抢占（有更高优先级任务等待）"""
+        # 当前任务是优先任务，不被抢占
+        if self.TaskMgr.IsPriority(self.Key):
+            return False
+        # 检查是否有优先任务在等待
+        NextKey = self.TaskMgr.GetNextTask()
+        if NextKey and NextKey != self.Key and self.TaskMgr.IsPriority(NextKey):
+            return True
+        return False
+
     def _DoRun(self):
         """实际执行处理逻辑"""
         Task = self.TaskMgr.Get(self.Key)
         if not Task:
-            self.Finished.emit(self.Key, False)
+            self.Finished.emit(self.Key, False, False)
             return
 
         # 如果还没有视频信息，先获取
@@ -150,7 +161,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在下载前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 下载前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "downloading")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Downloading, Progress=0)
@@ -163,14 +180,14 @@ class ProcessThread(QThread):
                     if not Success:
                         Log(f"下载失败: {Task['Url']}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                 except Exception as E:
                     import traceback
                     Log(f"下载错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
 
             # 阶段 2: 提取音频
@@ -178,7 +195,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在提取前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 提取前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "extracting")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Extracting, Progress=0)
@@ -188,14 +211,14 @@ class ProcessThread(QThread):
                     if not Result:
                         Log(f"音频提取失败: {VideoPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                 except Exception as E:
                     import traceback
                     Log(f"提取错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
 
                 self.TaskMgr.Update(self.Key, Progress=100)
@@ -205,7 +228,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在识别前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 识别前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "recognizing")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Recognizing, Progress=0)
@@ -224,14 +253,14 @@ class ProcessThread(QThread):
                     if not Result:
                         Log(f"识别失败: {AudioPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                 except Exception as E:
                     import traceback
                     Log(f"识别错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
 
             # 阶段 4: 翻译（英文 → 中文）
@@ -239,7 +268,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在翻译前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 翻译前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "translating")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Translating, Progress=0)
@@ -254,14 +289,14 @@ class ProcessThread(QThread):
                     if not Result:
                         Log(f"翻译失败: {EnSrtPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                 except Exception as E:
                     import traceback
                     Log(f"翻译错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
 
             # 翻译完成后生成双语字幕（中文在上，英文在下）
@@ -276,7 +311,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在配音前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 配音前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "dubbing")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Dubbing, Progress=0)
@@ -302,7 +343,7 @@ class ProcessThread(QThread):
                     if not DubbingResult:
                         Log(f"配音失败: {ZhSrtPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                     # 解包结果：(音频路径, 对齐后字幕路径)
                     _, AlignedSrtPath = DubbingResult
@@ -313,7 +354,7 @@ class ProcessThread(QThread):
                     Log(f"配音错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
             else:
                 # 配音已存在，检查对齐字幕是否存在
@@ -333,7 +374,13 @@ class ProcessThread(QThread):
                 if IsPaused:
                     Log(f"任务在合成前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
+                    return
+                # 合成前检查抢占
+                if self._ShouldPreempt():
+                    Log(f"任务被优先任务抢占，暂停等待")
+                    self.TaskMgr.Update(self.Key, Status=TaskStatus.Queued)
+                    self.Finished.emit(self.Key, False, True)
                     return
                 self.StageChanged.emit(self.Key, "merging")
                 self.TaskMgr.Update(self.Key, Status=TaskStatus.Merging, Progress=0)
@@ -364,27 +411,27 @@ class ProcessThread(QThread):
                     if not Result:
                         Log(f"合成失败: {VideoPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                        self.Finished.emit(self.Key, False)
+                        self.Finished.emit(self.Key, False, False)
                         return
                 except Exception as E:
                     import traceback
                     Log(f"合成错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-                    self.Finished.emit(self.Key, False)
+                    self.Finished.emit(self.Key, False, False)
                     return
 
             # 全部完成，标记为待发布
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Ready, Progress=100)
             Log(f"任务完成: {self.Key}")
-            self.Finished.emit(self.Key, True)
+            self.Finished.emit(self.Key, True, False)
 
         except Exception as E:
             import traceback
             Log(f"处理错误: {E}")
             Log(traceback.format_exc())
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
-            self.Finished.emit(self.Key, False)
+            self.Finished.emit(self.Key, False, False)
 
 
 # 状态对应颜色
@@ -488,6 +535,8 @@ class MainWindow(QMainWindow):
         self.TaskList.setMaximumWidth(250)
         self.TaskList.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.TaskList.currentItemChanged.connect(self.OnTaskSelected)
+        self.TaskList.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.TaskList.customContextMenuRequested.connect(self.OnTaskContextMenu)
         Splitter.addWidget(self.TaskList)
 
         # 右侧详情面板
@@ -791,13 +840,11 @@ class MainWindow(QMainWindow):
         if IsPaused:
             return
 
-        # 找到第一个等待中或已暂停的任务（按时间正序，先处理早的）
-        AllTasks = self.TaskMgr.GetAll()
-        AllTasks.reverse()  # GetAll 返回时间倒序，反转为正序
-        for Key, Task in AllTasks:
-            if Task["Status"] in [TaskStatus.Queued.value, TaskStatus.Paused.value]:
-                self.StartProcessing(Key)
-                return
+        # 使用 TaskManager 的优先队列逻辑获取下一个任务
+        NextKey = self.TaskMgr.GetNextTask()
+        if NextKey:
+            self.StartProcessing(NextKey)
+            return
 
         # 没有任务需要处理，清空流水线显示
         self.ClearPipelineDisplay()
@@ -833,7 +880,7 @@ class MainWindow(QMainWindow):
         if self.CurKey == Key and Task:
             self.UpdateDetail(Key, Task)
 
-    def OnProcessFinished(self, Key: str, Success: bool):
+    def OnProcessFinished(self, Key: str, Success: bool, Preempted: bool):
         """处理完成"""
         self.RefreshList()
         Task = self.TaskMgr.Get(Key)
@@ -841,6 +888,8 @@ class MainWindow(QMainWindow):
         if self.CurKey == Key and Task:
             self.UpdateDetail(Key, Task)
         # 尝试处理下一个任务（会自动更新流水线显示）
+        # 如果是被抢占的，下一个任务会是优先任务
+        # 优先任务完成后，被抢占的任务会继续执行
         self.TryStartProcessing()
 
     def OnPauseChanged(self, Paused: bool):
@@ -1007,7 +1056,10 @@ class MainWindow(QMainWindow):
         }.get(Status, Status)
         Color = StatusColors.get(Status, "#666666")
 
-        DisplayText = f"{TimeStr}\n{StatusText}"
+        # 优先任务标记
+        PriorityMark = "⚡ " if self.TaskMgr.IsPriority(Key) else ""
+
+        DisplayText = f"{PriorityMark}{TimeStr}\n{StatusText}"
         Item = QListWidgetItem(DisplayText)
         Item.setData(Qt.ItemDataRole.UserRole, Key)
         Item.setForeground(QColor(Color))
@@ -1189,6 +1241,148 @@ class MainWindow(QMainWindow):
         self.PublishUrlEdit.setText("")
         self.TitlePreview.setText("")
         self.DescPreview.setPlainText("")
+
+    def OnTaskContextMenu(self, Pos):
+        """任务列表右键菜单"""
+        Item = self.TaskList.itemAt(Pos)
+        if not Item:
+            return
+
+        Key = Item.data(Qt.ItemDataRole.UserRole)
+        Task = self.TaskMgr.Get(Key)
+        if not Task:
+            return
+
+        Menu = QMenu(self)
+
+        # 优先处理/取消优先
+        IsPriority = self.TaskMgr.IsPriority(Key)
+        if IsPriority:
+            CancelPriorityAction = Menu.addAction("取消优先")
+            CancelPriorityAction.triggered.connect(lambda: self.OnCancelPriority(Key))
+        else:
+            PriorityAction = Menu.addAction("优先处理")
+            PriorityAction.triggered.connect(lambda: self.OnSetPriority(Key))
+
+        Menu.addSeparator()
+
+        # 重新执行子菜单
+        ResetMenu = Menu.addMenu("重新执行")
+
+        ResetAllAction = ResetMenu.addAction("全部重新执行")
+        ResetAllAction.triggered.connect(lambda: self.OnResetTask(Key, "all"))
+
+        ResetMenu.addSeparator()
+
+        ResetDownloadAction = ResetMenu.addAction("从下载开始")
+        ResetDownloadAction.triggered.connect(lambda: self.OnResetTask(Key, "download"))
+
+        ResetExtractAction = ResetMenu.addAction("从提取音频开始")
+        ResetExtractAction.triggered.connect(lambda: self.OnResetTask(Key, "extract"))
+
+        ResetRecognizeAction = ResetMenu.addAction("从语音识别开始")
+        ResetRecognizeAction.triggered.connect(lambda: self.OnResetTask(Key, "recognize"))
+
+        ResetTranslateAction = ResetMenu.addAction("从翻译开始")
+        ResetTranslateAction.triggered.connect(lambda: self.OnResetTask(Key, "translate"))
+
+        ResetDubAction = ResetMenu.addAction("从配音开始")
+        ResetDubAction.triggered.connect(lambda: self.OnResetTask(Key, "dub"))
+
+        ResetMergeAction = ResetMenu.addAction("从合成开始")
+        ResetMergeAction.triggered.connect(lambda: self.OnResetTask(Key, "merge"))
+
+        Menu.addSeparator()
+
+        # 删除
+        DeleteAction = Menu.addAction("删除任务")
+        DeleteAction.triggered.connect(lambda: self.OnDeleteTask(Key))
+
+        Menu.exec(self.TaskList.mapToGlobal(Pos))
+
+    def OnSetPriority(self, Key: str):
+        """设置任务优先处理"""
+        self.TaskMgr.SetPriority(Key, True)
+        Log(f"已设为优先处理", Key)
+        self.RefreshList()
+
+    def OnCancelPriority(self, Key: str):
+        """取消任务优先处理"""
+        self.TaskMgr.SetPriority(Key, False)
+        Log(f"已取消优先处理", Key)
+        self.RefreshList()
+
+    def OnResetTask(self, Key: str, FromStage: str):
+        """重置任务"""
+        StageNames = {
+            "all": "全部",
+            "download": "下载",
+            "extract": "提取音频",
+            "recognize": "语音识别",
+            "translate": "翻译",
+            "dub": "配音",
+            "merge": "合成",
+        }
+        StageName = StageNames.get(FromStage, FromStage)
+
+        # 确认对话框
+        Reply = QMessageBox.question(
+            self, "确认重置",
+            f"确定要从 [{StageName}] 开始重新执行吗？\n这将删除该阶段及后续的所有缓存文件。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if Reply != QMessageBox.StandardButton.Yes:
+            return
+
+        Success = self.TaskMgr.Reset(Key, FromStage)
+        if Success:
+            Log(f"任务已重置，从 [{StageName}] 开始重新执行", Key)
+            self.RefreshList()
+            # 更新详情
+            Task = self.TaskMgr.Get(Key)
+            if Task and self.CurKey == Key:
+                self.UpdateDetail(Key, Task)
+                self.LoadTaskLog(Key)
+            # 尝试开始处理
+            self.TryStartProcessing()
+        else:
+            Log(f"任务重置失败", Key)
+
+    def OnDeleteTask(self, Key: str):
+        """删除任务"""
+        Task = self.TaskMgr.Get(Key)
+        if not Task:
+            return
+
+        # 确认对话框
+        Reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定要删除该任务吗？\n这将删除任务文件夹及所有相关文件。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if Reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # 从优先队列移除
+        self.TaskMgr.SetPriority(Key, False)
+        # 删除任务
+        self.TaskMgr.Delete(Key)
+
+        # 如果当前选中的就是被删除的任务，清空详情
+        if self.CurKey == Key:
+            self.CurKey = None
+            self.ClearDetail()
+            self.LogText.clear()
+
+        self.RefreshList()
+
+        # 选中第一个任务
+        if self.TaskList.count() > 0:
+            self.TaskList.setCurrentRow(0)
 
     def closeEvent(self, Event: QCloseEvent):
         """关闭窗口时隐藏而非退出"""

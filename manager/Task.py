@@ -50,6 +50,7 @@ class TaskManager:
 
     def __init__(self):
         self.Tasks = {}  # Key -> Task dict 缓存
+        self.PriorityKeys = set()  # 优先处理队列（Key 集合）
         self.Sync()
 
     def Sync(self):
@@ -218,3 +219,125 @@ class TaskManager:
         self.Update(Key, PublishUrl=PublishUrl)
         Count = CleanupTaskCache(self.GetTaskDir(Key))
         return True, f"已发布，清理 {Count} 个缓存文件"
+
+    def SetPriority(self, Key: str, IsPriority: bool):
+        """设置任务优先级"""
+        if IsPriority:
+            self.PriorityKeys.add(Key)
+        else:
+            self.PriorityKeys.discard(Key)
+
+    def IsPriority(self, Key: str) -> bool:
+        """检查任务是否在优先队列"""
+        return Key in self.PriorityKeys
+
+    def GetNextTask(self) -> str | None:
+        """获取下一个待处理任务（优先队列优先，再按时间正序）"""
+        # 收集等待中或已暂停的任务
+        PendingTasks = []
+        for Key, Task in self.Tasks.items():
+            if Task["Status"] in [TaskStatus.Queued.value, TaskStatus.Paused.value]:
+                PendingTasks.append(Key)
+
+        if not PendingTasks:
+            return None
+
+        # 分成优先和普通两组
+        PriorityTasks = [K for K in PendingTasks if K in self.PriorityKeys]
+        NormalTasks = [K for K in PendingTasks if K not in self.PriorityKeys]
+
+        # 优先队列按时间正序（Key 越小越早）
+        if PriorityTasks:
+            PriorityTasks.sort(key=lambda X: int(X))
+            return PriorityTasks[0]
+
+        # 普通队列按时间正序
+        if NormalTasks:
+            NormalTasks.sort(key=lambda X: int(X))
+            return NormalTasks[0]
+
+        return None
+
+    def Reset(self, Key: str, FromStage: str = "all") -> bool:
+        """重置任务：从指定阶段开始重新执行
+        FromStage: all=全部重置, download=从下载开始, extract=从提取开始,
+                   recognize=从识别开始, translate=从翻译开始, dub=从配音开始, merge=从合成开始
+        """
+        Task = self.Get(Key)
+        if not Task:
+            return False
+
+        Url = Task.get("Url", "")
+        if not Url:
+            return False
+
+        TaskDir = self.GetTaskDir(Key)
+        if not TaskDir.exists():
+            return False
+
+        # 各阶段对应的文件（按流程顺序）
+        # 删除某阶段意味着删除该阶段及后续所有文件
+        StageFiles = {
+            "download": ["video.mp4", "video_slow.mp4"],  # 下载阶段
+            "extract": ["audio.wav"],  # 提取阶段
+            "recognize": ["en.srt"],  # 识别阶段
+            "translate": ["zh-cn.srt", "bilingual.srt"],  # 翻译阶段
+            "dub": ["zh-cn.wav", "aligned.srt", "aligned_bilingual.srt"],  # 配音阶段
+            "merge": ["output.mp4"],  # 合成阶段
+        }
+        StageOrder = ["download", "extract", "recognize", "translate", "dub", "merge"]
+
+        if FromStage == "all":
+            # 全部重置：删除所有文件
+            FilesToDelete = []
+            for Files in StageFiles.values():
+                FilesToDelete.extend(Files)
+            FilesToDelete.extend(["info.json", "log.txt"])  # 也删除信息和日志
+
+            for FileName in FilesToDelete:
+                FilePath = TaskDir / FileName
+                if FilePath.exists():
+                    try:
+                        FilePath.unlink()
+                    except Exception:
+                        pass
+
+            # 重置任务信息，只保留 Url
+            self.Tasks[Key] = {
+                "Url": Url,
+                "Title": "",
+                "TitleZh": "",
+                "Author": "",
+                "Thumbnail": "",
+                "VideoId": "",
+                "PublishUrl": "",
+                "Error": "",
+                "Status": TaskStatus.Queued.value,
+                "Progress": 0,
+            }
+            self.SaveTask(Key)
+        else:
+            # 从指定阶段开始重置
+            if FromStage not in StageOrder:
+                return False
+
+            StartIndex = StageOrder.index(FromStage)
+            FilesToDelete = []
+            for I in range(StartIndex, len(StageOrder)):
+                Stage = StageOrder[I]
+                FilesToDelete.extend(StageFiles[Stage])
+
+            for FileName in FilesToDelete:
+                FilePath = TaskDir / FileName
+                if FilePath.exists():
+                    try:
+                        FilePath.unlink()
+                    except Exception:
+                        pass
+
+            # 更新状态为等待中
+            self.Tasks[Key]["Status"] = TaskStatus.Queued.value
+            self.Tasks[Key]["Progress"] = 0
+            self.Tasks[Key]["Error"] = ""
+
+        return True
