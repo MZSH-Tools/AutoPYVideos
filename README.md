@@ -1,40 +1,83 @@
 # AutoPYVideos
 
-英文视频中文化工具：自动将英文视频转换为中文字幕和配音
+English video to Chinese - auto subtitle, translation and dubbing.
 
-## 功能
+## Features
 
-### 已实现
+- YouTube video download (with proxy support)
+- Speech recognition (Faster-Whisper)
+- Subtitle translation (Google Translate / DeepL / OpenAI)
+- Chinese dubbing (Edge TTS)
+- Video composition (FFmpeg)
+- Task queue with priority support
+- Resume from breakpoint
+- Cross-platform (Windows / macOS)
 
-- [x] 系统托盘常驻运行
-- [x] YouTube 视频下载（支持代理）
-- [x] 音频提取（ffmpeg）
-- [x] 英文语音识别（Faster-Whisper，CPU 模式）
-- [x] 字幕翻译（Google Translate）
-- [x] 中文配音（edge-tts 微软免费 TTS）
-- [x] 音视频合成（ffmpeg）
-- [x] 任务队列管理（自动处理，同时只处理一个）
-- [x] 断点续传（基于文件夹状态推断）
-
-### 待实现
-
-- [ ] 发布功能
-
-## 处理流程
+## Workflow
 
 ```
-YouTube 链接 → 下载视频 → 提取音频 → 英文识别 → 翻译中文 → 中文配音 → 合成视频
+YouTube URL → Download → Extract Audio → Speech Recognition → Translation → Dubbing → Compose Video
 ```
 
-## 运行
+## Requirements
+
+- Python 3.10
+- FFmpeg
+- uv (recommended) or conda
+
+## Installation
+
+### Windows
 
 ```bash
-# 激活环境
-conda activate AutoPYVideos
+# Install FFmpeg via winget
+winget install Gyan.FFmpeg
 
-# 启动
-python RunManager.py
-
-# Windows 隐藏窗口启动
-双击 StartManager.vbs
+# Install dependencies
+uv sync
 ```
+
+### macOS
+
+```bash
+# Install FFmpeg via Homebrew
+brew install ffmpeg
+
+# Install dependencies
+uv sync
+```
+
+## Usage
+
+```bash
+# Run with uv
+uv run python RunManager.py
+
+# Or activate venv first
+source .venv/bin/activate  # macOS/Linux
+.venv\Scripts\activate     # Windows
+python RunManager.py
+```
+
+### Windows (Hidden Window)
+
+Double-click `StartManager.vbs`
+
+## Task Management
+
+- **Add Task**: Paste YouTube URL in the input box
+- **Priority**: Right-click → Set Priority (⚡ mark)
+- **Re-execute**: Right-click → Re-execute → Select stage
+- **Delete**: Right-click → Delete
+
+## Output
+
+Processed videos are saved in the task folder:
+- `video.mp4` - Original video
+- `en.srt` - English subtitle
+- `zh-cn.srt` - Chinese subtitle
+- `output.mp4` - Final video with Chinese dubbing
+
+## License
+
+GPL-3.0
