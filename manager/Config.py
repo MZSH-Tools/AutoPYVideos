@@ -115,6 +115,12 @@ def ApplyToVideotrans():
             config.settings[DstKey] = Val
             UpdatedSettings += 1
 
+    # 应用代理配置
+    Proxy = Cfg.get("代理", "")
+    if Proxy:
+        config.proxy = Proxy
+        print(f"Config: Proxy set to {Proxy}")
+
     print(f"Config: Applied {UpdatedParams} params, {UpdatedSettings} settings")
 
 

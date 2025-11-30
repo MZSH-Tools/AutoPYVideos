@@ -56,7 +56,11 @@ pip install PySide6 faster-whisper edge-tts yt-dlp ffmpeg-python srt pydub \
     pillow pygame qdarkstyle sherpa-onnx sounddevice gtts zhconv jieba \
     plyer psutil openai-whisper anthropic google-genai \
     google-cloud-texttospeech google-api-python-client dashscope \
-    transformers accelerate safetensors
+    transformers accelerate safetensors \
+    elevenlabs==2.8.1 deepgram-sdk==4.1.0 deepgram-captions speechrecognition \
+    alibabacloud-alimt20181012 alibabacloud-tea-openapi \
+    tencentcloud-sdk-python azure-cognitiveservices-speech \
+    funasr modelscope oss2 gradio-client moviepy pycryptodome
 ```
 
 ## Usage

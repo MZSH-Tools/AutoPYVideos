@@ -74,6 +74,10 @@ def Main():
         print("Waking existing instance...")
         sys.exit(0)
 
+    # 启用深色主题
+    import qdarkstyle
+    App.setStyleSheet(qdarkstyle.load_stylesheet(qt_api="pyside6"))
+
     App.setQuitOnLastWindowClosed(False)
 
     # 启动单实例服务器

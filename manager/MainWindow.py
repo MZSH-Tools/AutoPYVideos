@@ -141,10 +141,18 @@ class ProcessThread(QThread):
         # 如果还没翻译标题，先翻译（在下载前就可以看到中文标题预览）
         if Task and Task.get("Title") and not Task.get("TitleZh"):
             Log(f"翻译标题...")
-            TitleZh = TranslateText(Task["Title"], SourceLang="en", TargetLang="zh-cn")
-            if TitleZh:
-                Log(f"标题翻译完成: {TitleZh}")
-                self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
+            try:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as Executor:
+                    Future = Executor.submit(TranslateText, Task["Title"], "en", "zh-cn")
+                    TitleZh = Future.result(timeout=30)  # 30秒超时
+                if TitleZh:
+                    Log(f"标题翻译完成: {TitleZh}")
+                    self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
+            except concurrent.futures.TimeoutError:
+                Log(f"标题翻译超时，跳过")
+            except Exception as E:
+                Log(f"标题翻译失败: {E}")
 
         TaskDir = self.TaskMgr.GetTaskDir(self.Key)
         VideoPath = TaskDir / "video.mp4"
@@ -473,10 +481,19 @@ class MainWindow(QMainWindow):
         self.SelectProcessingTask()
         self.TryStartProcessing()
 
+    def CenterOnScreen(self):
+        """将窗口居中到屏幕中央"""
+        Screen = QApplication.primaryScreen().geometry()
+        X = (Screen.width() - self.width()) // 2
+        Y = (Screen.height() - self.height()) // 2
+        self.move(X, Y)
+
     def SetupUI(self):
         """初始化界面"""
         self.setWindowTitle("AutoPYVideos Manager")
-        self.setMinimumSize(1100, 750)
+        self.setMinimumSize(1200, 900)
+        self.resize(1200, 900)
+        self.CenterOnScreen()
 
         Central = QWidget()
         self.setCentralWidget(Central)
@@ -546,7 +563,7 @@ class MainWindow(QMainWindow):
         Splitter.addWidget(DetailPanel)
 
         # 详情内容样式
-        LabelStyle = "font-size: 13px; color: #333; padding: 3px 10px;"
+        LabelStyle = "font-size: 13px; padding: 3px 10px;"
         HeaderStyle = LabelStyle + "font-weight: bold;"
 
         # 状态行
@@ -604,7 +621,6 @@ class MainWindow(QMainWindow):
         TitlePreviewLayout.addWidget(QLabel("标题:"))
         self.TitlePreview = QLineEdit()
         self.TitlePreview.setReadOnly(True)
-        self.TitlePreview.setStyleSheet("background: #f0f0f0;")
         TitlePreviewLayout.addWidget(self.TitlePreview)
         self.CopyTitleBtn = QPushButton("复制")
         self.CopyTitleBtn.setFixedWidth(50)
@@ -618,7 +634,7 @@ class MainWindow(QMainWindow):
         self.DescPreview = QTextEdit()
         self.DescPreview.setReadOnly(True)
         self.DescPreview.setMinimumHeight(100)
-        self.DescPreview.setStyleSheet("background: #f0f0f0; font-size: 12px;")
+        self.DescPreview.setStyleSheet("font-size: 12px;")
         DescPreviewLayout.addWidget(self.DescPreview)
         self.CopyDescBtn = QPushButton("复制")
         self.CopyDescBtn.setFixedWidth(50)
@@ -660,7 +676,7 @@ class MainWindow(QMainWindow):
 
         # 当前任务标题
         self.PipelineTitle = QLabel("当前任务: 无")
-        self.PipelineTitle.setStyleSheet("font-size: 12px; font-weight: bold; color: #333;")
+        self.PipelineTitle.setStyleSheet("font-size: 12px; font-weight: bold;")
         LeftLayout.addWidget(self.PipelineTitle)
 
         # 流水线阶段
@@ -675,7 +691,7 @@ class MainWindow(QMainWindow):
         ]
         for StageKey, StageName in StageNames:
             Label = QLabel(f"○ {StageName}")
-            Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
+            Label.setStyleSheet("font-size: 11px; color: #888; padding: 1px 5px;")
             LeftLayout.addWidget(Label)
             self.StageLabels[StageKey] = Label
 
@@ -693,7 +709,7 @@ class MainWindow(QMainWindow):
         # 右侧：日志
         self.LogText = QTextEdit()
         self.LogText.setReadOnly(True)
-        self.LogText.setStyleSheet("font-family: Consolas, monospace; font-size: 12px; background: #f5f5f5; color: #333;")
+        self.LogText.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
         BottomLayout.addWidget(self.LogText)
 
         Layout.addLayout(BottomLayout)
@@ -981,7 +997,7 @@ class MainWindow(QMainWindow):
             else:
                 # 等待中
                 Label.setText(f"○ {Name}")
-                Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
+                Label.setStyleSheet("font-size: 11px; color: #888; padding: 1px 5px;")
 
     def ClearPipelineDisplay(self):
         """清空流水线显示（无任务时）"""
@@ -998,7 +1014,7 @@ class MainWindow(QMainWindow):
             Label = self.StageLabels.get(Stage)
             if Label:
                 Label.setText(f"○ {Name}")
-                Label.setStyleSheet("font-size: 11px; color: #999; padding: 1px 5px;")
+                Label.setStyleSheet("font-size: 11px; color: #888; padding: 1px 5px;")
 
     def UpdateProgressDisplay(self, Percent: int, Stage: str):
         """更新进度显示（状态行右侧）"""
