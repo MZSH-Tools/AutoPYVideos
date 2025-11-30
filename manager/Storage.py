@@ -37,21 +37,34 @@ def GetSettingsPath() -> Path:
 
 
 def LoadSettings() -> dict:
-    """加载全局设置"""
-    SettingsPath = GetSettingsPath()
-    Default = {"TitlePrefix": "", "TitleSuffix": "", "DescriptionExtra": ""}
-    if not SettingsPath.exists():
-        return Default
-    try:
-        with open(SettingsPath, "r", encoding="utf-8") as F:
-            Data = json.load(F)
-            return {**Default, **Data}
-    except:
-        return Default
+    """从项目配置文件读取发布设置"""
+    from manager.Config import Get
+
+    return {
+        "TitlePrefix": Get("发布.标题前缀", ""),
+        "TitleSuffix": Get("发布.标题后缀", ""),
+        "DescriptionExtra": Get("发布.简介附加", ""),
+    }
 
 
 def SaveSettings(Settings: dict):
-    """保存全局设置"""
-    SettingsPath = GetSettingsPath()
-    with open(SettingsPath, "w", encoding="utf-8") as F:
-        json.dump(Settings, F, ensure_ascii=False, indent=2)
+    """保存发布设置到项目配置文件"""
+    from manager.Config import CONFIG_PATH, LoadProjectConfig, ClearCache
+
+    Cfg = LoadProjectConfig()
+
+    # 确保发布节点存在
+    if "发布" not in Cfg:
+        Cfg["发布"] = {}
+
+    # 更新值
+    Cfg["发布"]["标题前缀"] = Settings.get("TitlePrefix", "")
+    Cfg["发布"]["标题后缀"] = Settings.get("TitleSuffix", "")
+    Cfg["发布"]["简介附加"] = Settings.get("DescriptionExtra", "")
+
+    # 写回文件
+    with open(CONFIG_PATH, "w", encoding="utf-8") as F:
+        json.dump(Cfg, F, ensure_ascii=False, indent=2)
+
+    # 清除缓存以便下次读取最新值
+    ClearCache()

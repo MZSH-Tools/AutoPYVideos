@@ -141,3 +141,9 @@ def Get(Path: str, Default=None):
             return Default
         Cfg = Cfg[Key]
     return Cfg
+
+
+def ClearCache():
+    """清除配置缓存，下次读取时重新加载文件"""
+    global _ProjectConfig
+    _ProjectConfig = None
