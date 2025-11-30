@@ -54,11 +54,11 @@ def _GenerateNewSrt(QueueTts: list, OutputDir: Path) -> Path | None:
         Lines.append("")
 
     if not Lines:
-        Log(f"_GenerateNewSrt: No subtitles to write")
+        Log(f"生成对齐字幕: 无字幕内容")
         return None
 
     OutputPath.write_text("\n".join(Lines), encoding="utf-8")
-    Log(f"_GenerateNewSrt: Generated aligned subtitle -> {OutputPath}")
+    Log(f"生成对齐字幕: 完成 -> {OutputPath}")
     return OutputPath
 
 
@@ -99,59 +99,45 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                     ProgressCallback=None) -> tuple[Path, Path] | None:
     """
     使用 videotrans 的 tts.run 接口根据字幕生成配音音频，并使用 SpeedRate 对齐
-    SrtPath: 输入字幕路径
-    OutputPath: 输出音频路径，默认为同目录下 zh-cn.wav
-    Voice: edge-tts 声音显示名称（如 晓晓 多语言(Female/CN)）
-    VideoPath: 原视频路径（视频慢速时需要，会被原地修改为慢速视频）
-    VoiceAutorate: 是否启用配音自动加速对齐（默认 False）
-    VideoSlowdown: 是否启用视频慢速对齐（默认 True）
-    ProgressCallback: 进度回调 (percent, text)
-    返回 (音频路径, 对齐后字幕路径) 或 None
     """
     from videotrans import tts
     from videotrans.configure import config
     from videotrans.util import tools
 
     if not SrtPath.exists():
-        Log(f"GenerateDubbing: SRT not found: {SrtPath}")
+        Log(f"配音: 字幕文件不存在: {SrtPath}")
         return None
 
     if OutputPath is None:
         OutputPath = SrtPath.parent / "zh-cn.wav"
 
-    # 已存在则跳过（检查对齐字幕是否也存在）
+    # 已存在则跳过
     AlignedSrtPath = SrtPath.parent / "aligned.srt"
     if OutputPath.exists():
-        Log(f"GenerateDubbing: Audio already exists: {OutputPath}")
-        if AlignedSrtPath.exists():
-            return (OutputPath, AlignedSrtPath)
-        return (OutputPath, None)
+        Log(f"配音: 跳过，音频已存在: {OutputPath}")
+        return (OutputPath, AlignedSrtPath) if AlignedSrtPath.exists() else (OutputPath, None)
 
-    Log(f"GenerateDubbing: Parsing subtitles...")
     Subtitles = ParseSrt(SrtPath)
     if not Subtitles:
-        Log(f"GenerateDubbing: No subtitles found")
+        Log(f"配音: 字幕文件中无字幕内容: {SrtPath}")
         return None
 
-    Log(f"GenerateDubbing: Generating {len(Subtitles)} segments using Edge-TTS...")
-    if ProgressCallback:
-        ProgressCallback(5, "Initializing TTS...")
-
-    # 获取真正的 voice ID
+    # 获取 voice ID
     VoiceId = tools.get_edge_rolelist(Voice, "zh-cn")
     if not VoiceId:
-        Log(f"GenerateDubbing: Voice '{Voice}' not found, using default")
-        VoiceId = "zh-CN-XiaoxiaoNeural"  # 晓晓
-    Log(f"GenerateDubbing: Voice ID = {VoiceId}")
+        Log(f"配音: 声音 '{Voice}' 未找到，使用默认 zh-CN-XiaoxiaoNeural")
+        VoiceId = "zh-CN-XiaoxiaoNeural"
+
+    # 读取配置
+    VoiceRate = config.settings.get("voice_rate", "+0%")
+    UseProxy = config.proxy if config.proxy else None
+
+    Log(f"配音: {len(Subtitles)} 条字幕, 声音={VoiceId}, 语速={VoiceRate}, 代理={UseProxy}")
+    Log(f"配音: 音频加速={VoiceAutorate}, 视频慢放={VideoSlowdown}")
 
     # 创建缓存目录
     CacheDir = SrtPath.parent / "tts_cache"
     CacheDir.mkdir(exist_ok=True)
-
-    # 获取全局代理设置
-    UseProxy = config.proxy if config.proxy else None
-    Log(f"GenerateDubbing: Using proxy: {UseProxy}")
-    Log(f"GenerateDubbing: Voice autorate: {VoiceAutorate}, Video slowdown: {VideoSlowdown}")
 
     if ProgressCallback:
         ProgressCallback(10, "Generating TTS...")
@@ -160,32 +146,24 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     OrigBoxTts = config.box_tts
 
     try:
-        # 设置状态以绕过 videotrans 的状态检查
         config.box_tts = 'ing'
 
-        # 构建 videotrans tts 格式的 queue_tts
-        # 注意：role 要用 VoiceId（如 zh-CN-XiaochenMultilingualNeural），不是显示名称
-        # 注意：filename 必须包含 .wav 后缀，因为 SpeedRate 直接使用这个路径加载文件
-        # 从配置读取语速设置
-        VoiceRate = config.settings.get("voice_rate", "+0%")
-        Log(f"GenerateDubbing: Voice rate = {VoiceRate}")
-
+        # 构建 queue_tts
         QueueTts = []
         for I, Sub in enumerate(Subtitles):
             QueueTts.append({
                 "text": Sub["text"],
-                "role": VoiceId,  # 使用 VoiceId，不是 Voice 显示名称
+                "role": VoiceId,
                 "filename": str(CacheDir / f"seg_{I:04d}.wav"),
                 "start_time": int(Sub["start"] * 1000),
                 "end_time": int(Sub["end"] * 1000),
-                "line": I + 1,  # SpeedRate 需要 line 字段
-                "rate": VoiceRate,  # 语速设置
+                "line": I + 1,
+                "rate": VoiceRate,
             })
-
-        Log(f"GenerateDubbing: Calling tts.run with {len(QueueTts)} items")
 
         Result = None
         try:
+            Log(f"配音: 调用 videotrans tts.run...")
             tts.run(
                 queue_tts=QueueTts,
                 language="zh-cn",
@@ -196,39 +174,34 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
                 ProgressCallback(50, "Checking audio files...")
 
             # 检查生成的音频文件
-            SuccessCount = 0
-            for I, Item in enumerate(QueueTts):
-                WavFile = Path(Item["filename"])
-                if WavFile.exists() and WavFile.stat().st_size > 0:
-                    SuccessCount += 1
+            SuccessCount = sum(1 for Item in QueueTts
+                              if Path(Item["filename"]).exists() and Path(Item["filename"]).stat().st_size > 0)
+            FailedCount = len(QueueTts) - SuccessCount
 
             if SuccessCount == 0:
-                Log(f"GenerateDubbing: videotrans produced no audio, falling back...")
+                Log(f"配音: videotrans tts.run 未生成任何音频，切换到备用方案 edge-tts")
                 Result = _GenerateDubbingDirect(Subtitles, OutputPath, VoiceId, UseProxy,
-                                              CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback)
+                                              CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback, VoiceRate)
             else:
-                Log(f"GenerateDubbing: Generated {SuccessCount}/{len(QueueTts)} audio segments")
+                Log(f"配音: videotrans tts.run 成功, {SuccessCount} 成功, {FailedCount} 失败")
 
                 if ProgressCallback:
                     ProgressCallback(60, "Aligning audio...")
 
-                # 使用 SpeedRate 进行音频对齐和合并
                 Result = _AlignAndMergeAudio(QueueTts, OutputPath, CacheDir, VideoPath,
                                             VoiceAutorate, VideoSlowdown, ProgressCallback)
 
         except Exception as TtsErr:
-            Log(f"GenerateDubbing: tts.run failed: {TtsErr}")
-            Log(f"GenerateDubbing: Falling back to direct edge-tts...")
+            Log(f"配音: videotrans tts.run 异常: {TtsErr}, 切换到备用方案 edge-tts")
             Result = _GenerateDubbingDirect(Subtitles, OutputPath, VoiceId, UseProxy,
-                                          CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback)
+                                          CacheDir, VideoPath, VoiceAutorate, VideoSlowdown, ProgressCallback, VoiceRate)
 
-        # 无论成功失败，都清理缓存目录
+        # 清理缓存
         if CacheDir.exists():
             try:
                 shutil.rmtree(CacheDir)
-                Log(f"GenerateDubbing: Cleaned up cache dir")
-            except Exception as CleanErr:
-                Log(f"GenerateDubbing: Failed to clean cache: {CleanErr}")
+            except:
+                pass
 
         if ProgressCallback:
             ProgressCallback(100, "Done")
@@ -237,9 +210,8 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 
     except Exception as E:
         import traceback
-        Log(f"GenerateDubbing error: {E}")
+        Log(f"配音错误: {E}")
         Log(traceback.format_exc())
-        # 异常时也清理缓存
         if CacheDir.exists():
             try:
                 shutil.rmtree(CacheDir)
@@ -254,15 +226,15 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
                            Proxy: str, CacheDir: Path, VideoPath: Path,
                            VoiceAutorate: bool, VideoSlowdown: bool,
-                           ProgressCallback) -> Path | None:
+                           ProgressCallback, VoiceRate: str = "+0%") -> Path | None:
     """直接使用 edge-tts 库生成配音（备用方案）"""
     import asyncio
     from edge_tts import Communicate
     from videotrans.util.help_ffmpeg import runffmpeg
 
-    Log(f"_GenerateDubbingDirect: Generating {len(Subtitles)} segments...")
+    Log(f"备用配音: {len(Subtitles)} 条字幕, 声音={VoiceId}, 语速={VoiceRate}")
 
-    # 构建 queue_tts 格式（filename 必须包含 .wav 后缀）
+    # 构建 queue_tts
     QueueTts = []
     for I, Sub in enumerate(Subtitles):
         QueueTts.append({
@@ -270,8 +242,10 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
             "filename": str(CacheDir / f"seg_{I:04d}.wav"),
             "start_time": int(Sub["start"] * 1000),
             "end_time": int(Sub["end"] * 1000),
-            "line": I + 1,  # SpeedRate 需要 line 字段
+            "line": I + 1,
         })
+
+    FailedSegments = []
 
     async def GenerateAll():
         for I, Sub in enumerate(Subtitles):
@@ -282,32 +256,32 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
             OutFile = CacheDir / f"seg_{I:04d}.mp3"
             WavFile = CacheDir / f"seg_{I:04d}.wav"
 
-            # 跳过已存在的
             if WavFile.exists() and WavFile.stat().st_size > 0:
                 continue
 
             try:
-                Comm = Communicate(Sub["text"], voice=VoiceId, proxy=Proxy)
+                Comm = Communicate(Sub["text"], voice=VoiceId, proxy=Proxy, rate=VoiceRate)
                 await Comm.save(str(OutFile))
                 if OutFile.exists() and OutFile.stat().st_size > 0:
                     runffmpeg(["-y", "-i", str(OutFile), "-ar", "44100", "-ac", "2", str(WavFile)])
             except Exception as E:
-                Log(f"_GenerateDubbingDirect: Segment {I} failed: {E}")
+                FailedSegments.append((I, str(E)))
 
     try:
         asyncio.run(GenerateAll())
     except Exception as E:
-        Log(f"_GenerateDubbingDirect error: {E}")
+        Log(f"备用配音错误: {E}")
         return None
 
-    # 检查成功数量
-    SuccessCount = sum(1 for Item in QueueTts
-                       if Path(Item["filename"]).exists())
+    # 统计结果
+    SuccessCount = sum(1 for Item in QueueTts if Path(Item["filename"]).exists())
     if SuccessCount == 0:
-        Log(f"_GenerateDubbingDirect: No audio files generated")
+        Log(f"备用配音: 全部失败")
         return None
 
-    Log(f"_GenerateDubbingDirect: Generated {SuccessCount}/{len(QueueTts)} segments")
+    if FailedSegments:
+        Log(f"备用配音: {len(FailedSegments)} 条失败: {FailedSegments[:3]}...")
+    Log(f"备用配音: {SuccessCount}/{len(QueueTts)} 条成功")
 
     if ProgressCallback:
         ProgressCallback(60, "Aligning audio...")
@@ -317,37 +291,35 @@ def _GenerateDubbingDirect(Subtitles: list, OutputPath: Path, VoiceId: str,
 
 
 def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path, VideoPath: Path,
-                        VoiceAutorate: bool, VideoSlowdown: bool, ProgressCallback) -> Path | None:
+                        VoiceAutorate: bool, VideoSlowdown: bool, ProgressCallback) -> tuple[Path, Path] | None:
     """使用 videotrans 的 SpeedRate 对齐并合并音频"""
     import copy
     from videotrans.task._rate import SpeedRate
     from videotrans.configure import config
 
-    Log(f"_AlignAndMergeAudio: Aligning {len(QueueTts)} segments (audiorate={VoiceAutorate}, videorate={VideoSlowdown})...")
+    # 统计音频文件
+    ExistCount = sum(1 for Item in QueueTts if Path(Item["filename"]).exists())
+    MissingCount = len(QueueTts) - ExistCount
+    if MissingCount > 0:
+        Log(f"音频对齐: {ExistCount} 个文件存在, {MissingCount} 个缺失")
+    else:
+        Log(f"音频对齐: 全部 {ExistCount} 个文件存在")
 
-    # 先检查音频文件是否存在
-    for I, Item in enumerate(QueueTts):
-        WavFile = Path(Item["filename"])
-        if WavFile.exists():
-            Size = WavFile.stat().st_size
-            Log(f"  Segment {I}: {WavFile.name} ({Size} bytes)")
-        else:
-            Log(f"  Segment {I}: {WavFile.name} NOT FOUND")
-
-    # 深拷贝，因为 SpeedRate 会修改 queue_tts（可能将 filename 设为 None）
+    # 深拷贝
     QueueTtsCopy = copy.deepcopy(QueueTts)
 
-    # 计算总时长（最后一个字幕的结束时间，毫秒）
+    # 计算总时长
     RawTotalTime = QueueTts[-1]["end_time"] if QueueTts else 0
-    Log(f"_AlignAndMergeAudio: Total time = {RawTotalTime}ms")
 
     # 视频慢速需要原视频文件
     NovoiceMp4 = str(VideoPath) if VideoSlowdown and VideoPath and VideoPath.exists() else None
     if VideoSlowdown and not NovoiceMp4:
-        Log(f"_AlignAndMergeAudio: Video slowdown requested but no video file, disabling")
+        Log(f"音频对齐: 请求视频慢放但无视频文件，已禁用")
+        VideoSlowdown = False
+
+    Log(f"音频对齐: 总时长={RawTotalTime}ms, 音频加速={VoiceAutorate}, 视频慢放={VideoSlowdown}")
 
     try:
-        # 使用 SpeedRate 进行对齐（使用副本，因为 SpeedRate 会修改 queue_tts）
         RateInst = SpeedRate(
             queue_tts=QueueTtsCopy,
             shoud_audiorate=VoiceAutorate,
@@ -363,32 +335,30 @@ def _AlignAndMergeAudio(QueueTts: list, OutputPath: Path, CacheDir: Path, VideoP
         if ProgressCallback:
             ProgressCallback(70, "Processing alignment...")
 
-        # 执行对齐，返回更新后的 queue_tts（包含新时间轴）
+        Log(f"音频对齐: 执行 SpeedRate...")
         UpdatedQueueTts = RateInst.run()
 
         if OutputPath.exists():
             Size = OutputPath.stat().st_size
-            Log(f"_AlignAndMergeAudio: Output file size = {Size} bytes")
-            if Size > 1000:  # 至少 1KB 才算有效
-                Log(f"_AlignAndMergeAudio: Done -> {OutputPath}")
-                # 如果启用了视频慢速，生成新的字幕文件
+            if Size > 1000:
+                Log(f"音频对齐: 完成, 输出={Size} 字节")
                 NewSrtPath = None
                 if VideoSlowdown and UpdatedQueueTts:
                     NewSrtPath = _GenerateNewSrt(UpdatedQueueTts, OutputPath.parent)
                 return (OutputPath, NewSrtPath)
             else:
-                Log(f"_AlignAndMergeAudio: Output too small, using fallback...")
-                OutputPath.unlink()  # 删除无效文件
+                Log(f"音频对齐: 输出太小 ({Size} 字节), 切换到简单合并")
+                OutputPath.unlink()
                 return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
         else:
-            Log(f"_AlignAndMergeAudio: SpeedRate did not produce output, using fallback...")
+            Log(f"音频对齐: SpeedRate 未生成输出, 切换到简单合并")
             return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
 
     except Exception as E:
         import traceback
-        Log(f"_AlignAndMergeAudio error: {E}")
+        Log(f"音频对齐错误: {E}")
         Log(traceback.format_exc())
-        Log(f"_AlignAndMergeAudio: Falling back to simple merge...")
+        Log(f"音频对齐: 切换到简单合并")
         return (_MergeAudioSimple(QueueTts, OutputPath, CacheDir), None)
 
 
@@ -396,24 +366,23 @@ def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path |
     """简单合并音频文件（备用方案，不做加速对齐）"""
     from videotrans.util.help_ffmpeg import runffmpeg
 
-    Log(f"_MergeAudioSimple: Starting simple merge...")
+    Log(f"简单合并: 开始...")
 
     AudioFiles = []
     for Item in QueueTts:
         WavFile = Path(Item["filename"])
         if WavFile.exists() and WavFile.stat().st_size > 0:
             AudioFiles.append((Item["start_time"], WavFile))
-            Log(f"  Found: {WavFile.name} at {Item['start_time']}ms")
 
     if not AudioFiles:
-        Log(f"_MergeAudioSimple: No audio files found")
+        Log(f"简单合并: 无音频文件")
         return None
+
+    Log(f"简单合并: {len(AudioFiles)} 个文件")
 
     AudioFiles.sort(key=lambda X: X[0])
     LastEndTime = QueueTts[-1]["end_time"] / 1000
     SilenceFile = TempDir / "silence.wav"
-
-    Log(f"_MergeAudioSimple: Creating {LastEndTime + 1}s silence base...")
 
     # 生成静音底座
     runffmpeg([
@@ -425,24 +394,16 @@ def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path |
     ])
 
     if len(AudioFiles) == 1:
-        Log(f"_MergeAudioSimple: Single file, copying directly...")
         shutil.copy(AudioFiles[0][1], OutputPath)
     else:
-        Log(f"_MergeAudioSimple: Merging {len(AudioFiles)} files with overlay...")
-
-        # 使用 overlay 方式而不是 amix（避免音量衰减问题）
         Inputs = ["-i", str(SilenceFile)]
         FilterParts = []
 
         for I, (StartMs, WavFile) in enumerate(AudioFiles):
             Inputs.extend(["-i", str(WavFile)])
-            # adelay 延迟到指定位置
             FilterParts.append(f"[{I+1}]adelay={StartMs}|{StartMs}[d{I}]")
 
-        # 使用 amix 但不要 normalize，并且设置 dropout_transition 避免突然静音
         NumInputs = len(AudioFiles) + 1
-        MixInputs = "[0]" + "".join(f"[d{I}]" for I in range(len(AudioFiles)))
-        # 用 volume=0 让静音底座真正静音，然后用 amix 混合
         FilterComplex = "[0]volume=0[s0];" + ";".join(FilterParts) + f";[s0]" + "".join(f"[d{I}]" for I in range(len(AudioFiles))) + f"amix=inputs={NumInputs}:duration=longest:dropout_transition=0:normalize=0[out]"
 
         Cmd = ["-y"] + Inputs + [
@@ -453,13 +414,11 @@ def _MergeAudioSimple(QueueTts: list, OutputPath: Path, TempDir: Path) -> Path |
             str(OutputPath)
         ]
 
-        Log(f"_MergeAudioSimple: Running ffmpeg...")
         runffmpeg(Cmd)
 
     if OutputPath.exists():
-        Size = OutputPath.stat().st_size
-        Log(f"_MergeAudioSimple: Done -> {OutputPath} ({Size} bytes)")
+        Log(f"简单合并: 完成, 输出={OutputPath.stat().st_size} 字节")
         return OutputPath
     else:
-        Log(f"_MergeAudioSimple: Output not created")
+        Log(f"简单合并: 失败，无输出")
         return None
