@@ -50,7 +50,6 @@ class TaskManager:
 
     def __init__(self):
         self.Tasks = {}  # Key -> Task dict 缓存
-        self.PriorityKeys = set()  # 优先处理队列（Key 集合）
         self.Sync()
 
     def Sync(self):
@@ -113,6 +112,7 @@ class TaskManager:
             "Thumbnail": "",
             "VideoId": "",
             "PublishUrl": "",
+            "Priority": False,  # 优先处理标记
             "Error": "",
             "Status": TaskStatus.Queued.value,
             "Progress": 0,
@@ -178,7 +178,7 @@ class TaskManager:
                 V = V.value
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
-            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url"]:
+            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "Priority"]:
                 NeedSave = True
         if NeedSave:
             self.SaveTask(Key)
@@ -222,14 +222,12 @@ class TaskManager:
 
     def SetPriority(self, Key: str, IsPriority: bool):
         """设置任务优先级"""
-        if IsPriority:
-            self.PriorityKeys.add(Key)
-        else:
-            self.PriorityKeys.discard(Key)
+        self.Update(Key, Priority=IsPriority)
 
     def IsPriority(self, Key: str) -> bool:
         """检查任务是否在优先队列"""
-        return Key in self.PriorityKeys
+        Task = self.Get(Key)
+        return Task.get("Priority", False) if Task else False
 
     def GetNextTask(self) -> str | None:
         """获取下一个待处理任务（优先队列优先，再按时间正序）"""
@@ -243,8 +241,8 @@ class TaskManager:
             return None
 
         # 分成优先和普通两组
-        PriorityTasks = [K for K in PendingTasks if K in self.PriorityKeys]
-        NormalTasks = [K for K in PendingTasks if K not in self.PriorityKeys]
+        PriorityTasks = [K for K in PendingTasks if self.IsPriority(K)]
+        NormalTasks = [K for K in PendingTasks if not self.IsPriority(K)]
 
         # 优先队列按时间正序（Key 越小越早）
         if PriorityTasks:
@@ -302,7 +300,8 @@ class TaskManager:
                     except Exception:
                         pass
 
-            # 重置任务信息，只保留 Url
+            # 重置任务信息，保留 Url 和 Priority
+            Priority = self.Tasks[Key].get("Priority", False)
             self.Tasks[Key] = {
                 "Url": Url,
                 "Title": "",
@@ -311,6 +310,7 @@ class TaskManager:
                 "Thumbnail": "",
                 "VideoId": "",
                 "PublishUrl": "",
+                "Priority": Priority,
                 "Error": "",
                 "Status": TaskStatus.Queued.value,
                 "Progress": 0,
