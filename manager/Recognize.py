@@ -28,7 +28,7 @@ def FormatSrtTime(Seconds: float) -> str:
 
 
 def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en",
-                   Model: str = "large-v3-turbo", UseCuda: bool = False,
+                   Model: str = "medium.en", UseCuda: bool = False,
                    SplitType: int = 0, AutoFix: bool = True,
                    ProgressCallback=None) -> Path | None:
     """

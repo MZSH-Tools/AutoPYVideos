@@ -308,6 +308,14 @@ class ProcessThread(QThread):
                 if not AlignedSrtPath.exists():
                     AlignedSrtPath = None
 
+            # 如果有对齐字幕，生成对齐版双语字幕
+            AlignedBilingualSrtPath = TaskDir / "aligned_bilingual.srt"
+            if AlignedSrtPath and AlignedSrtPath.exists() and EnSrtPath.exists():
+                if not AlignedBilingualSrtPath.exists():
+                    Log(f"Generating aligned bilingual subtitle...")
+                    MergeBilingualSrt(AlignedSrtPath, EnSrtPath, AlignedBilingualSrtPath,
+                                      TargetLang="zh-cn", SourceLang="en")
+
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
                 if IsPaused:
@@ -322,16 +330,24 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "merging", 0)
 
                 try:
-                    # 优先使用对齐后的字幕（视频慢速后时间轴正确）
-                    # 否则使用双语字幕或中文字幕
-                    if AlignedSrtPath and AlignedSrtPath.exists():
-                        SubtitlePath = AlignedSrtPath
-                        Log(f"Using aligned subtitle for merge: {SubtitlePath}")
+                    # 优先使用对齐版双语字幕（视频慢速后时间轴正确+双语）
+                    # 其次使用普通双语字幕，最后使用中文字幕
+                    if AlignedBilingualSrtPath.exists():
+                        SubtitlePath = AlignedBilingualSrtPath
+                        Log(f"Using aligned bilingual subtitle for merge: {SubtitlePath}")
                     elif BilingualSrtPath.exists():
                         SubtitlePath = BilingualSrtPath
+                        Log(f"Using bilingual subtitle for merge: {SubtitlePath}")
                     else:
                         SubtitlePath = ZhSrtPath
-                    Result = MergeVideo(VideoPath, ZhAudioPath, SubtitlePath, OutputPath,
+                        Log(f"Using Chinese subtitle for merge: {SubtitlePath}")
+
+                    # 优先使用慢速后的视频（如果存在）
+                    SlowVideoPath = TaskDir / "video_slow.mp4"
+                    MergeVideoPath = SlowVideoPath if SlowVideoPath.exists() else VideoPath
+                    Log(f"Using video for merge: {MergeVideoPath}")
+
+                    Result = MergeVideo(MergeVideoPath, ZhAudioPath, SubtitlePath, OutputPath,
                                         HardSubtitle=True, ProgressCallback=OnMergeProgress)
                     if not Result:
                         Log(f"Merge failed: {VideoPath}")
