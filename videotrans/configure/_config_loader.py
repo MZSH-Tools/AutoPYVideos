@@ -647,6 +647,7 @@ def getset_params(obj=None):
         "dubb_hecheng_rate": 0,
         "dubb_pitch_rate": 0,
         "dubb_volume_rate": 0,
+        "clear_cache": True,  # 默认清理已生成文件，防止使用缓存
     }
     try:
         if Path(ROOT_DIR + "/videotrans/params.json").exists():

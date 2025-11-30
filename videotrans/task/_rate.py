@@ -130,9 +130,20 @@ class SpeedRate:
         self.source_video_fps = 30
         # 默认一帧时长ms
         self.fps_ms = 1000 // 30
-        
-        self.crf="18"
-        self.preset="medium"
+        # 获取原视频分辨率
+        self.video_width = None
+        self.video_height = None
+        if novoice_mp4 and tools.vail_file(novoice_mp4):
+            try:
+                video_info = tools.get_video_info(novoice_mp4)
+                self.video_width = video_info.get('width')
+                self.video_height = video_info.get('height')
+                logs(f"原视频分辨率: {self.video_width}x{self.video_height}")
+            except Exception as e:
+                logs(f"无法获取原视频分辨率: {e}", level='warn')
+
+        self.crf="20"
+        self.preset="fast"
         try:
             if Path(config.ROOT_DIR+"/crf.txt").exists():
                 self.crf=str(int(Path(config.ROOT_DIR+"/crf.txt").read_text()))
@@ -698,23 +709,30 @@ class SpeedRate:
 
     def _cut_to_intermediate(self, ss, to, source, pts, out,subject=""):
         """视频变速"""
-        cmd = ['-y',  '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t',
-               f'{(to - ss) / 1000.0}','-i', source, 
-               '-an', '-c:v', 'libx264',"-x264-params", "keyint=1:min-keyint=1:scenecut=0", '-preset', self.preset, '-crf', self.crf,
-               '-pix_fmt', 'yuv420p']
-        if pts:
-            cmd.extend(['-vf', f'setpts={pts}*PTS', '-vsync', 'vfr'])
+        # 构建视频滤镜：保持原分辨率 + PTS变速
+        if self.video_width and self.video_height:
+            scale_filter = f"scale={self.video_width}:{self.video_height}"
+            if pts:
+                vf_param = f'{scale_filter},setpts={pts}*PTS'
+            else:
+                vf_param = f'{scale_filter},setpts=PTS'
         else:
-            cmd.extend(['-vf', f'setpts=PTS', '-vsync', 'vfr'])
-        cmd.append(out)
+            # 无分辨率信息时只使用 PTS
+            vf_param = f'setpts={pts}*PTS' if pts else 'setpts=PTS'
+
+        cmd = ['-y',  '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t',
+               f'{(to - ss) / 1000.0}','-i', source,
+               '-an', '-c:v', 'libx264',"-x264-params", "keyint=1:min-keyint=1:scenecut=0", '-preset', self.preset, '-crf', self.crf,
+               '-pix_fmt', 'yuv420p', '-vf', vf_param, '-vsync', 'vfr', out]
         try:
             tools.runffmpeg(cmd, force_cpu=True)
             if (not Path(out).exists() or Path(out).stat().st_size < 1024) and pts:
                 logs(f"[{subject}] 中间片段 {Path(out).name} 生成失败，尝试无PTS参数重试。",level='warn')
+                vf_retry = f'{scale_filter},setpts=PTS' if self.video_width and self.video_height else 'setpts=PTS'
                 tools.runffmpeg(['-y', '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t',
                                  f'{(to - ss) / 1000.0}', '-i', source,
                                  '-an', '-c:v', 'libx264', '-preset', self.preset, '-crf', self.crf,
-                                 '-pix_fmt', 'yuv420p', '-vf', f'setpts=PTS', '-vsync', 'vfr', out],
+                                 '-pix_fmt', 'yuv420p', '-vf', vf_retry, '-vsync', 'vfr', out],
                                 force_cpu=True)
             # 仍然有错就放弃了
             if Path(out).exists() and Path(out).stat().st_size < 1024:
@@ -783,8 +801,8 @@ class SpeedRate:
         if not Path(intermediate_merged_path).exists():
             logs("拼接后的中间视频文件未能生成，视频处理失败！",level='warn')
             return
+        # 保存慢速视频为 video_slow.mp4，保持原视频不变
         try:
-            # 保存慢速视频为 video_slow.mp4，保持原视频不变
             original_path = Path(self.novoice_mp4)
             slow_video_path = original_path.parent / "video_slow.mp4"
             Path(intermediate_merged_path).rename(slow_video_path)
