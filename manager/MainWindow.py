@@ -584,8 +584,11 @@ class MainWindow(QMainWindow):
         PublishLayout.addWidget(PublishLabel)
         self.PublishUrlEdit = QLineEdit()
         self.PublishUrlEdit.setPlaceholderText("输入发布后的链接...")
-        self.PublishUrlEdit.editingFinished.connect(self.OnPublishUrlChanged)
         PublishLayout.addWidget(self.PublishUrlEdit)
+        self.PublishBtn = QPushButton("发布")
+        self.PublishBtn.setFixedWidth(50)
+        self.PublishBtn.clicked.connect(self.OnPublish)
+        PublishLayout.addWidget(self.PublishBtn)
         DetailLayout.addLayout(PublishLayout)
 
         # 打开文件夹按钮（最下面）
@@ -1140,12 +1143,24 @@ class MainWindow(QMainWindow):
         if Text:
             QApplication.clipboard().setText(Text)
 
-    def OnPublishUrlChanged(self):
-        """发布链接编辑完成"""
+    def OnPublish(self):
+        """点击发布按钮：验证链接并清理缓存"""
         if not self.CurKey:
             return
-        NewUrl = self.PublishUrlEdit.text().strip()
-        self.TaskMgr.Update(self.CurKey, PublishUrl=NewUrl)
+        Url = self.PublishUrlEdit.text().strip()
+        if not Url:
+            Log("请输入发布链接", self.CurKey)
+            return
+
+        Log(f"验证链接: {Url}", self.CurKey)
+        Success, Msg = self.TaskMgr.Archive(self.CurKey, Url)
+        Log(Msg, self.CurKey)
+
+        if Success:
+            self.RefreshList()
+            Task = self.TaskMgr.Get(self.CurKey)
+            if Task:
+                self.UpdateDetail(self.CurKey, Task)
 
     def OnOpenFolder(self):
         """打开任务文件夹"""
