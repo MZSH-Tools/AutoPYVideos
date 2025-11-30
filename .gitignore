@@ -74,3 +74,6 @@ videotrans/util/segments.py
 nul
 run-conda.bat
 uv.lock
+
+# Output folder
+output/

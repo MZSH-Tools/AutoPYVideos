@@ -37,31 +37,67 @@ winget install Gyan.FFmpeg
 uv sync
 ```
 
-### macOS
+### macOS (with Conda)
 
 ```bash
 # Install FFmpeg via Homebrew
 brew install ffmpeg
 
+# Create conda environment
+conda create -n AutoPYVideos python=3.10
+conda activate AutoPYVideos
+
+# Install PyTorch (CPU version)
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
 # Install dependencies
-uv sync
+pip install PySide6 faster-whisper edge-tts yt-dlp ffmpeg-python srt pydub \
+    openai deepl requests httpx aiohttp numpy scipy librosa soundfile \
+    pillow pygame qdarkstyle sherpa-onnx sounddevice gtts zhconv jieba \
+    plyer psutil openai-whisper anthropic google-genai \
+    google-cloud-texttospeech google-api-python-client dashscope \
+    transformers accelerate safetensors
 ```
 
 ## Usage
+
+### Windows
 
 ```bash
 # Run with uv
 uv run python RunManager.py
 
 # Or activate venv first
-source .venv/bin/activate  # macOS/Linux
-.venv\Scripts\activate     # Windows
+.venv\Scripts\activate
 python RunManager.py
+
+# Hidden window (double-click)
+StartManager.vbs
 ```
 
-### Windows (Hidden Window)
+### macOS
 
-Double-click `StartManager.vbs`
+```bash
+# Run with conda
+conda run -n AutoPYVideos python RunManager.py
+
+# Or activate environment first
+conda activate AutoPYVideos
+python RunManager.py
+
+# Double-click launcher
+Start.command
+```
+
+### Auto-start on Login (macOS)
+
+```bash
+# Enable
+launchctl load ~/Library/LaunchAgents/com.autopyvideos.plist
+
+# Disable
+launchctl unload ~/Library/LaunchAgents/com.autopyvideos.plist
+```
 
 ## Task Management
 

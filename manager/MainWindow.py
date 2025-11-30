@@ -1220,10 +1220,13 @@ class MainWindow(QMainWindow):
             return
         import os
         import subprocess
+        import sys
         TaskDir = self.TaskMgr.GetTaskDir(self.CurKey)
         if TaskDir.exists():
-            if os.name == "nt":
+            if sys.platform == "win32":
                 subprocess.run(["explorer", str(TaskDir)])
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(TaskDir)])
             else:
                 subprocess.run(["xdg-open", str(TaskDir)])
 

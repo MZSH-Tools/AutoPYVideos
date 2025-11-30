@@ -1,32 +1,37 @@
 # AutoPYVideos Manager
 
-将英文 YouTube 视频自动转换为中文语音中文字幕的视频。
+English YouTube videos to Chinese - auto subtitle, translation and dubbing.
 
-## 处理流程
+## Workflow
 
 ```
-英文视频 → 语音识别 → 英文字幕 → 翻译 → 中文字幕 → 配音 → 中文视频
+YouTube URL → Download → Extract Audio → Speech Recognition → Translation → Dubbing → Compose Video
 ```
 
-## 已实现
+## Features
 
-| 功能 | 工具/模型 | 说明 |
-|------|-----------|------|
-| 视频下载 | yt-dlp | 支持断点续传 |
-| 语音识别 | Faster-Whisper large-v3 | 英文语音 → 英文字幕 |
-| 字幕翻译 | Google Translate | 英文 → 中文 |
+| Feature | Tool | Status |
+|---------|------|--------|
+| Video Download | yt-dlp | Done |
+| Audio Extract | FFmpeg | Done |
+| Speech Recognition | Faster-Whisper | Done |
+| Translation | Google Translate | Done |
+| Dubbing | Edge-TTS | Done |
+| Video Compose | FFmpeg (hard subtitle) | Done |
 
-## 待实现
+## Run
 
-| 功能 | 说明 |
-|------|------|
-| 配音 | 中文 TTS 语音合成 |
-| 合成 | 替换原音轨，生成最终视频 |
-
-## 运行
+### Windows
 
 ```bash
 conda activate AutoPYVideos
-cd manager
-python App.py
+python RunManager.py
+```
+
+### macOS
+
+```bash
+conda run -n AutoPYVideos python RunManager.py
+
+# Or double-click Start.command
 ```
