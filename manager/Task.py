@@ -125,10 +125,10 @@ class TaskManager:
         if not Task:
             return False
 
-        print(f"FetchInfo: Fetching info for {Task['Url']}")
+        print(f"获取信息: 获取视频信息 {Task['Url']}")
         Info = FetchVideoInfo(Task["Url"])
         if Info:
-            print(f"FetchInfo: Got title '{Info['Title']}', author '{Info['Author']}'")
+            print(f"获取信息: 标题='{Info['Title']}', 作者='{Info['Author']}'")
             self.Update(Key,
                 Title=Info["Title"],
                 Author=Info["Author"],
@@ -136,7 +136,7 @@ class TaskManager:
                 VideoId=Info["VideoId"]
             )
             return True
-        print("FetchInfo: Failed to get info")
+        print("获取信息: 获取失败")
         return False
 
     def Download(self, Key: str, ProgressCallback=None) -> bool:

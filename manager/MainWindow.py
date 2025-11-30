@@ -128,16 +128,16 @@ class ProcessThread(QThread):
 
         # 如果还没有视频信息，先获取
         if not Task.get("Title"):
-            Log(f"Fetching video info...")
+            Log(f"获取视频信息...")
             self.TaskMgr.FetchInfo(self.Key)
             Task = self.TaskMgr.Get(self.Key)  # 重新获取更新后的任务
 
         # 如果还没翻译标题，先翻译（在下载前就可以看到中文标题预览）
         if Task and Task.get("Title") and not Task.get("TitleZh"):
-            Log(f"Translating title...")
+            Log(f"翻译标题...")
             TitleZh = TranslateText(Task["Title"], SourceLang="en", TargetLang="zh-cn")
             if TitleZh:
-                Log(f"Title translated: {TitleZh}")
+                Log(f"标题翻译完成: {TitleZh}")
                 self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
 
         TaskDir = self.TaskMgr.GetTaskDir(self.Key)
@@ -153,7 +153,7 @@ class ProcessThread(QThread):
             # 阶段 1: 下载视频
             if not VideoPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before downloading")
+                    Log(f"任务在下载前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -166,13 +166,13 @@ class ProcessThread(QThread):
                 try:
                     Success = self.TaskMgr.Download(self.Key, OnDownloadProgress)
                     if not Success:
-                        Log(f"Download failed: {Task['Url']}")
+                        Log(f"下载失败: {Task['Url']}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                 except Exception as E:
                     import traceback
-                    Log(f"Download error: {E}")
+                    Log(f"下载错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -181,7 +181,7 @@ class ProcessThread(QThread):
             # 阶段 2: 提取音频
             if not AudioPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before extracting")
+                    Log(f"任务在提取前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -191,13 +191,13 @@ class ProcessThread(QThread):
                 try:
                     Result = ExtractAudio(VideoPath, AudioPath)
                     if not Result:
-                        Log(f"Audio extraction failed: {VideoPath}")
+                        Log(f"音频提取失败: {VideoPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                 except Exception as E:
                     import traceback
-                    Log(f"Extraction error: {E}")
+                    Log(f"提取错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -208,7 +208,7 @@ class ProcessThread(QThread):
             # 阶段 3: 语音识别
             if not EnSrtPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before recognizing")
+                    Log(f"任务在识别前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -222,13 +222,13 @@ class ProcessThread(QThread):
                     Result = RecognizeAudio(AudioPath, EnSrtPath, Language="en",
                                             ProgressCallback=OnRecognizeProgress)
                     if not Result:
-                        Log(f"Recognition failed: {AudioPath}")
+                        Log(f"识别失败: {AudioPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                 except Exception as E:
                     import traceback
-                    Log(f"Recognition error: {E}")
+                    Log(f"识别错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -237,7 +237,7 @@ class ProcessThread(QThread):
             # 阶段 4: 翻译（英文 → 中文）
             if not ZhSrtPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before translating")
+                    Log(f"任务在翻译前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -252,13 +252,13 @@ class ProcessThread(QThread):
                                           SourceLang="en", TargetLang="zh-cn",
                                           ProgressCallback=OnTranslateProgress)
                     if not Result:
-                        Log(f"Translation failed: {EnSrtPath}")
+                        Log(f"翻译失败: {EnSrtPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                 except Exception as E:
                     import traceback
-                    Log(f"Translation error: {E}")
+                    Log(f"翻译错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -266,7 +266,7 @@ class ProcessThread(QThread):
 
             # 翻译完成后生成双语字幕（中文在上，英文在下）
             if not BilingualSrtPath.exists() and ZhSrtPath.exists() and EnSrtPath.exists():
-                Log(f"Generating bilingual subtitle...")
+                Log(f"生成双语字幕...")
                 MergeBilingualSrt(ZhSrtPath, EnSrtPath, BilingualSrtPath,
                                   TargetLang="zh-cn", SourceLang="en")
 
@@ -274,7 +274,7 @@ class ProcessThread(QThread):
             AlignedSrtPath = TaskDir / "aligned.srt"  # 对齐后的字幕（视频慢速时生成）
             if not ZhAudioPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before dubbing")
+                    Log(f"任务在配音前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -288,17 +288,17 @@ class ProcessThread(QThread):
                     DubbingResult = GenerateDubbing(ZhSrtPath, ZhAudioPath, VideoPath=VideoPath,
                                                     ProgressCallback=OnDubbingProgress)
                     if not DubbingResult:
-                        Log(f"Dubbing failed: {ZhSrtPath}")
+                        Log(f"配音失败: {ZhSrtPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                     # 解包结果：(音频路径, 对齐后字幕路径)
                     _, AlignedSrtPath = DubbingResult
                     if AlignedSrtPath:
-                        Log(f"Dubbing produced aligned subtitle: {AlignedSrtPath}")
+                        Log(f"配音生成对齐字幕: {AlignedSrtPath}")
                 except Exception as E:
                     import traceback
-                    Log(f"Dubbing error: {E}")
+                    Log(f"配音错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -312,14 +312,14 @@ class ProcessThread(QThread):
             AlignedBilingualSrtPath = TaskDir / "aligned_bilingual.srt"
             if AlignedSrtPath and AlignedSrtPath.exists() and EnSrtPath.exists():
                 if not AlignedBilingualSrtPath.exists():
-                    Log(f"Generating aligned bilingual subtitle...")
+                    Log(f"生成对齐版双语字幕...")
                     MergeBilingualSrt(AlignedSrtPath, EnSrtPath, AlignedBilingualSrtPath,
                                       TargetLang="zh-cn", SourceLang="en")
 
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
                 if IsPaused:
-                    Log(f"Task paused before merging")
+                    Log(f"任务在合成前暂停")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False)
                     return
@@ -334,29 +334,29 @@ class ProcessThread(QThread):
                     # 其次使用普通双语字幕，最后使用中文字幕
                     if AlignedBilingualSrtPath.exists():
                         SubtitlePath = AlignedBilingualSrtPath
-                        Log(f"Using aligned bilingual subtitle for merge: {SubtitlePath}")
+                        Log(f"使用对齐版双语字幕: {SubtitlePath}")
                     elif BilingualSrtPath.exists():
                         SubtitlePath = BilingualSrtPath
-                        Log(f"Using bilingual subtitle for merge: {SubtitlePath}")
+                        Log(f"使用双语字幕: {SubtitlePath}")
                     else:
                         SubtitlePath = ZhSrtPath
-                        Log(f"Using Chinese subtitle for merge: {SubtitlePath}")
+                        Log(f"使用中文字幕: {SubtitlePath}")
 
                     # 优先使用慢速后的视频（如果存在）
                     SlowVideoPath = TaskDir / "video_slow.mp4"
                     MergeVideoPath = SlowVideoPath if SlowVideoPath.exists() else VideoPath
-                    Log(f"Using video for merge: {MergeVideoPath}")
+                    Log(f"使用视频: {MergeVideoPath}")
 
                     Result = MergeVideo(MergeVideoPath, ZhAudioPath, SubtitlePath, OutputPath,
                                         HardSubtitle=True, ProgressCallback=OnMergeProgress)
                     if not Result:
-                        Log(f"Merge failed: {VideoPath}")
+                        Log(f"合成失败: {VideoPath}")
                         self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                         self.Finished.emit(self.Key, False)
                         return
                 except Exception as E:
                     import traceback
-                    Log(f"Merge error: {E}")
+                    Log(f"合成错误: {E}")
                     Log(traceback.format_exc())
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
                     self.Finished.emit(self.Key, False)
@@ -364,12 +364,12 @@ class ProcessThread(QThread):
 
             # 全部完成，标记为待发布
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Ready, Progress=100)
-            Log(f"Task completed: {self.Key}")
+            Log(f"任务完成: {self.Key}")
             self.Finished.emit(self.Key, True)
 
         except Exception as E:
             import traceback
-            Log(f"Process error: {E}")
+            Log(f"处理错误: {E}")
             Log(traceback.format_exc())
             self.TaskMgr.Update(self.Key, Status=TaskStatus.Failed)
             self.Finished.emit(self.Key, False)
@@ -719,7 +719,7 @@ class MainWindow(QMainWindow):
             Key = self.TaskMgr.Add(Url)
             self.RefreshList()
             self.SelectTask(Key)
-            Log(f"Task added, fetching info...", Key)
+            Log(f"任务已添加，获取信息中...", Key)
             # 后台获取视频信息
             self.StartFetchInfo(Key, Url)
 
@@ -736,9 +736,9 @@ class MainWindow(QMainWindow):
         """视频信息获取完成"""
         Task = self.TaskMgr.Get(Key)
         if Success and Task:
-            Log(f"Info fetched: {Task.get('Title', '')[:30]}", Key)
+            Log(f"信息获取完成: {Task.get('Title', '')[:30]}", Key)
         else:
-            Log(f"Failed to fetch info", Key)
+            Log(f"获取信息失败", Key)
         # 刷新列表和详情（保持选中）
         self.RefreshList()
         if self.CurKey == Key and Task:

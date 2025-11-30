@@ -92,11 +92,11 @@ def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path
     from videotrans.configure import config
 
     if not TargetSrtPath.exists():
-        Log(f"MergeBilingualSrt: Target SRT not found: {TargetSrtPath}")
+        Log(f"合并双语字幕: 目标字幕不存在: {TargetSrtPath}")
         return None
 
     if not SourceSrtPath.exists():
-        Log(f"MergeBilingualSrt: Source SRT not found: {SourceSrtPath}")
+        Log(f"合并双语字幕: 源字幕不存在: {SourceSrtPath}")
         return None
 
     if OutputPath is None:
@@ -104,23 +104,23 @@ def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path
 
     # 已存在则跳过
     if OutputPath.exists():
-        Log(f"MergeBilingualSrt: Output already exists: {OutputPath}")
+        Log(f"合并双语字幕: 输出已存在，跳过: {OutputPath}")
         return OutputPath
 
-    Log(f"MergeBilingualSrt: Loading subtitles...")
+    Log(f"合并双语字幕: 加载字幕...")
 
     try:
         TargetSubList = get_subtitle_from_srt(str(TargetSrtPath))
         SourceSubList = get_subtitle_from_srt(str(SourceSrtPath))
     except Exception as E:
-        Log(f"MergeBilingualSrt: Failed to load subtitles: {E}")
+        Log(f"合并双语字幕: 加载字幕失败: {E}")
         return None
 
     if not TargetSubList or not SourceSubList:
-        Log(f"MergeBilingualSrt: Empty subtitles")
+        Log(f"合并双语字幕: 字幕为空")
         return None
 
-    Log(f"MergeBilingualSrt: Merging {len(TargetSubList)} + {len(SourceSubList)} subtitles...")
+    Log(f"合并双语字幕: 合并 {len(TargetSubList)} + {len(SourceSubList)} 条字幕...")
 
     # 硬字幕时单行字符数（参考 trans_create.py:893-896）
     MaxlenTarget = int(config.settings.get('cjk_len', 15) if TargetLang[:2] in ["zh", "ja", "jp", "ko", "yu"]
@@ -143,7 +143,7 @@ def MergeBilingualSrt(TargetSrtPath: Path, SourceSrtPath: Path, OutputPath: Path
         SrtString += "\n\n"
 
     OutputPath.write_text(SrtString.strip(), encoding="utf-8")
-    Log(f"MergeBilingualSrt: Done -> {OutputPath}")
+    Log(f"合并双语字幕: 完成 -> {OutputPath}")
     return OutputPath
 
 
@@ -186,7 +186,7 @@ def TranslateText(Text: str, SourceLang: str = "en", TargetLang: str = "zh-cn",
         return None
 
     except Exception as E:
-        Log(f"TranslateText error: {E}")
+        Log(f"翻译文本: 错误: {E}")
         return None
 
     finally:
@@ -220,7 +220,7 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
     OrigBoxTrans = config.box_trans
 
     if not InputSrt.exists():
-        Log(f"TranslateSrt: Input not found: {InputSrt}")
+        Log(f"翻译字幕: 输入文件不存在: {InputSrt}")
         return None
 
     if OutputSrt is None:
@@ -228,19 +228,19 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
 
     # 已存在则跳过
     if OutputSrt.exists():
-        Log(f"TranslateSrt: Output already exists: {OutputSrt}")
+        Log(f"翻译字幕: 输出已存在，跳过: {OutputSrt}")
         return OutputSrt
 
     # 解析字幕
     Subtitles = ParseSrt(InputSrt)
     if not Subtitles:
-        Log(f"TranslateSrt: No subtitles found in {InputSrt}")
+        Log(f"翻译字幕: 无字幕内容: {InputSrt}")
         return None
 
-    Log(f"TranslateSrt: Translating {len(Subtitles)} subtitles ({SourceLang} -> {TargetLang})...")
-    Log(f"TranslateSrt: Using translate_type={TranslateType}, proxy={config.proxy}")
+    Log(f"翻译字幕: 翻译 {len(Subtitles)} 条字幕 ({SourceLang} -> {TargetLang})...")
+    Log(f"翻译字幕: 翻译引擎={TranslateType}, 代理={config.proxy}")
     if ProgressCallback:
-        ProgressCallback(10, "Translating...")
+        ProgressCallback(10, "翻译中...")
 
     try:
         # 设置状态以绕过 videotrans 的状态检查
@@ -268,16 +268,16 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
                 if Result:
                     break
             except Exception as TransErr:
-                Log(f"TranslateSrt: Attempt {Attempt} failed: {TransErr}")
-                Log(f"TranslateSrt: Retrying in {RetryDelay} seconds...")
+                Log(f"翻译字幕: 第 {Attempt} 次尝试失败: {TransErr}")
+                Log(f"翻译字幕: {RetryDelay} 秒后重试...")
                 time.sleep(RetryDelay)
                 RetryDelay = min(RetryDelay * 2, MaxDelay)  # 指数退避，最大60秒
 
         if not Result:
-            Log(f"TranslateSrt: Translation returned empty result")
+            Log(f"翻译字幕: 翻译结果为空")
             return None
 
-        Log(f"TranslateSrt: Got {len(Result)} results")
+        Log(f"翻译字幕: 获得 {len(Result)} 条结果")
 
         # 合并翻译结果
         # Result 格式可能是 [str, ...] 或 [{"text": str}, ...]
@@ -299,14 +299,14 @@ def TranslateSrt(InputSrt: Path, OutputSrt: Path = None,
         WriteSrt(Translated, OutputSrt)
 
         if ProgressCallback:
-            ProgressCallback(100, "Done")
+            ProgressCallback(100, "完成")
 
-        Log(f"TranslateSrt: Done -> {OutputSrt}")
+        Log(f"翻译字幕: 完成 -> {OutputSrt}")
         return OutputSrt
 
     except Exception as E:
         import traceback
-        Log(f"TranslateSrt error: {E}")
+        Log(f"翻译字幕: 错误: {E}")
         Log(traceback.format_exc())
         return None
 

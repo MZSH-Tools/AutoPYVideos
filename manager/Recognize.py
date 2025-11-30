@@ -48,7 +48,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
     from videotrans.util import tools
 
     if not AudioPath.exists():
-        Log(f"RecognizeAudio: Audio not found: {AudioPath}")
+        Log(f"语音识别: 音频文件不存在: {AudioPath}")
         return None
 
     if OutputSrt is None:
@@ -56,14 +56,14 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
 
     # 已存在则跳过
     if OutputSrt.exists():
-        Log(f"RecognizeAudio: SRT already exists: {OutputSrt}")
+        Log(f"语音识别: 字幕已存在，跳过: {OutputSrt}")
         return OutputSrt
 
-    Log(f"RecognizeAudio: Using {'CUDA' if UseCuda else 'CPU'} mode")
-    Log(f"RecognizeAudio: Model={Model}, Language={Language}, SplitType={SplitType}, AutoFix={AutoFix}")
+    Log(f"语音识别: 使用 {'CUDA' if UseCuda else 'CPU'} 模式")
+    Log(f"语音识别: 模型={Model}, 语言={Language}, 分割方式={SplitType}, 自动修正={AutoFix}")
 
     if ProgressCallback:
-        ProgressCallback(10, f"Loading {Model}...")
+        ProgressCallback(10, f"加载模型 {Model}...")
 
     # 保存原状态
     OrigBoxRecogn = config.box_recogn
@@ -78,7 +78,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         # 创建临时缓存目录
         CacheFolder = Path(tempfile.mkdtemp())
 
-        Log(f"RecognizeAudio: Calling recognition.run...")
+        Log(f"语音识别: 调用 recognition.run...")
 
         # 调用 videotrans 识别接口
         Result = recognition.run(
@@ -93,24 +93,24 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         )
 
         if not Result:
-            Log(f"RecognizeAudio: Recognition failed, no result")
+            Log(f"语音识别: 识别失败，无结果")
             return None
 
-        Log(f"RecognizeAudio: Got {len(Result)} segments")
+        Log(f"语音识别: 获得 {len(Result)} 个片段")
 
         if ProgressCallback:
-            ProgressCallback(70, "Processing results...")
+            ProgressCallback(70, "处理结果...")
 
         # 自动修正字幕（如果启用）
         if AutoFix and Result:
-            Log(f"RecognizeAudio: Applying auto fix...")
+            Log(f"语音识别: 应用自动修正...")
             if ProgressCallback:
-                ProgressCallback(80, "Auto fixing...")
+                ProgressCallback(80, "自动修正...")
             Result = tools.auto_fix_srtdict(Result, Language)
-            Log(f"RecognizeAudio: After auto fix: {len(Result)} segments")
+            Log(f"语音识别: 修正后 {len(Result)} 个片段")
 
         if ProgressCallback:
-            ProgressCallback(90, "Writing SRT...")
+            ProgressCallback(90, "写入字幕...")
 
         # Result 格式: [{"start_time": ms, "end_time": ms, "text": "..."}, ...]
         # 转换为 SRT 格式
@@ -131,14 +131,14 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         OutputSrt.write_text("\n".join(SrtLines), encoding="utf-8")
 
         if ProgressCallback:
-            ProgressCallback(100, "Done")
+            ProgressCallback(100, "完成")
 
-        Log(f"RecognizeAudio: Done -> {OutputSrt}")
+        Log(f"语音识别: 完成 -> {OutputSrt}")
         return OutputSrt
 
     except Exception as E:
         import traceback
-        Log(f"RecognizeAudio error: {E}")
+        Log(f"语音识别: 错误: {E}")
         Log(traceback.format_exc())
         return None
 

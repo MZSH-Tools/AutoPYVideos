@@ -26,7 +26,7 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
     from videotrans.util import tools
 
     if not VideoPath.exists():
-        Log(f"ExtractAudio: Video not found: {VideoPath}")
+        Log(f"提取音频: 视频不存在: {VideoPath}")
         return None
 
     if OutputPath is None:
@@ -34,19 +34,19 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
 
     # 已存在则跳过
     if OutputPath.exists():
-        Log(f"ExtractAudio: Audio already exists: {OutputPath}")
+        Log(f"提取音频: 音频已存在，跳过: {OutputPath}")
         return OutputPath
 
     try:
         # 先检查视频是否有音频流
-        Log(f"ExtractAudio: Checking audio stream in {VideoPath.name}...")
+        Log(f"提取音频: 检查音频流 {VideoPath.name}...")
         try:
             Duration = tools.get_video_duration(str(VideoPath))
-            Log(f"ExtractAudio: Video duration = {Duration}ms")
+            Log(f"提取音频: 视频时长 = {Duration}ms")
         except Exception as E:
-            Log(f"ExtractAudio: Failed to get video info: {E}")
+            Log(f"提取音频: 获取视频信息失败: {E}")
 
-        Log(f"ExtractAudio: Extracting audio from {VideoPath.name}...")
+        Log(f"提取音频: 从 {VideoPath.name} 提取音频...")
         # ffmpeg 提取音频：16kHz 单声道 wav（Whisper 最佳格式）
         Cmd = [
             "-y",
@@ -58,20 +58,20 @@ def ExtractAudio(VideoPath: Path, OutputPath: Path = None) -> Path | None:
             Path(OutputPath).as_posix()
         ]
         Result = runffmpeg(Cmd)
-        Log(f"ExtractAudio: ffmpeg result = {Result}")
+        Log(f"提取音频: ffmpeg 结果 = {Result}")
 
         if OutputPath.exists():
             Size = OutputPath.stat().st_size
-            Log(f"ExtractAudio: Done -> {OutputPath} ({Size} bytes)")
+            Log(f"提取音频: 完成 -> {OutputPath} ({Size} 字节)")
             if Size < 1000:
-                Log(f"ExtractAudio: Warning - output file is very small, video may have no audio stream")
+                Log(f"提取音频: 警告 - 输出文件非常小，视频可能没有音频流")
             return OutputPath
         else:
-            Log(f"ExtractAudio: Output not created - video may have no audio stream!")
+            Log(f"提取音频: 输出未生成 - 视频可能没有音频流!")
             return None
 
     except Exception as E:
         import traceback
-        Log(f"ExtractAudio error: {E}")
+        Log(f"提取音频: 错误: {E}")
         Log(traceback.format_exc())
         return None

@@ -30,20 +30,20 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
     from videotrans.configure import config
 
     if not VideoPath.exists():
-        Log(f"MergeWithHardSubtitle: Video not found: {VideoPath}")
+        Log(f"硬字幕合成: 视频不存在: {VideoPath}")
         return False
 
     if not AudioPath.exists():
-        Log(f"MergeWithHardSubtitle: Audio not found: {AudioPath}")
+        Log(f"硬字幕合成: 音频不存在: {AudioPath}")
         return False
 
     if not SubtitlePath.exists():
-        Log(f"MergeWithHardSubtitle: Subtitle not found: {SubtitlePath}")
+        Log(f"硬字幕合成: 字幕不存在: {SubtitlePath}")
         return False
 
-    Log(f"MergeWithHardSubtitle: Burning subtitle into video...")
+    Log(f"硬字幕合成: 烧录字幕到视频...")
     if ProgressCallback:
-        ProgressCallback(10, "Encoding...")
+        ProgressCallback(10, "编码中...")
 
     # 保存原工作目录
     OrigCwd = os.getcwd()
@@ -76,24 +76,24 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
             Path(OutputPath).as_posix()
         ]
 
-        Log(f"MergeWithHardSubtitle: Running ffmpeg (video re-encoding)...")
+        Log(f"硬字幕合成: 执行 ffmpeg (视频重编码)...")
 
         # 调用 videotrans 的 runffmpeg（自动处理硬件编码器和回退）
         Result = runffmpeg(Cmd)
 
         if ProgressCallback:
-            ProgressCallback(100, "Done")
+            ProgressCallback(100, "完成")
 
         if OutputPath.exists():
-            Log(f"MergeWithHardSubtitle: Done -> {OutputPath}")
+            Log(f"硬字幕合成: 完成 -> {OutputPath}")
             return True
         else:
-            Log(f"MergeWithHardSubtitle: Output not created")
+            Log(f"硬字幕合成: 输出未生成")
             return False
 
     except Exception as E:
         import traceback
-        Log(f"MergeWithHardSubtitle error: {E}")
+        Log(f"硬字幕合成: 错误: {E}")
         Log(traceback.format_exc())
         return False
 
@@ -114,16 +114,16 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
     from videotrans.util.help_ffmpeg import runffmpeg
 
     if not VideoPath.exists():
-        Log(f"MergeVideoAudio: Video not found: {VideoPath}")
+        Log(f"音视频合成: 视频不存在: {VideoPath}")
         return False
 
     if not AudioPath.exists():
-        Log(f"MergeVideoAudio: Audio not found: {AudioPath}")
+        Log(f"音视频合成: 音频不存在: {AudioPath}")
         return False
 
-    Log(f"MergeVideoAudio: Merging video and audio...")
+    Log(f"音视频合成: 合并视频和音频...")
     if ProgressCallback:
-        ProgressCallback(10, "Merging...")
+        ProgressCallback(10, "合并中...")
 
     try:
         # 构建 ffmpeg 参数
@@ -145,18 +145,18 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         Result = runffmpeg(Cmd)
 
         if ProgressCallback:
-            ProgressCallback(100, "Done")
+            ProgressCallback(100, "完成")
 
         if OutputPath.exists():
-            Log(f"MergeVideoAudio: Done -> {OutputPath}")
+            Log(f"音视频合成: 完成 -> {OutputPath}")
             return True
         else:
-            Log(f"MergeVideoAudio: Output not created")
+            Log(f"音视频合成: 输出未生成")
             return False
 
     except Exception as E:
         import traceback
-        Log(f"MergeVideoAudio error: {E}")
+        Log(f"音视频合成: 错误: {E}")
         Log(traceback.format_exc())
         return False
 
@@ -179,7 +179,7 @@ def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
 
     # 已存在则跳过
     if OutputPath.exists():
-        Log(f"MergeVideo: Output already exists: {OutputPath}")
+        Log(f"视频合成: 输出已存在，跳过: {OutputPath}")
         return OutputPath
 
     if HardSubtitle and SubtitlePath and SubtitlePath.exists():
