@@ -55,6 +55,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
     # 保存原状态
     OrigBoxRecogn = config.box_recogn
     OrigRephrase = config.settings.get('rephrase', 0)
+    CacheFolder = None
 
     try:
         # 设置状态以绕过 videotrans 的状态检查
@@ -143,3 +144,7 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         # 恢复原状态
         config.box_recogn = OrigBoxRecogn
         config.settings['rephrase'] = OrigRephrase
+        # 清理临时目录
+        if CacheFolder and CacheFolder.exists():
+            import shutil
+            shutil.rmtree(CacheFolder, ignore_errors=True)

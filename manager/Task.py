@@ -50,16 +50,20 @@ class TaskManager:
 
     def __init__(self):
         self.Tasks = {}  # Key -> Task dict 缓存
+        self.UrlIndex = {}  # Url -> Key 索引
         self.Sync()
 
     def Sync(self):
         """从文件夹同步任务状态"""
         self.Tasks = {}
+        self.UrlIndex = {}
         for TaskDir in ListTaskDirs():
             Key = TaskDir.name
             Task = self.LoadTask(TaskDir)
             if Task:
                 self.Tasks[Key] = Task
+                if Task.get("Url"):
+                    self.UrlIndex[Task["Url"]] = Key
 
     def LoadTask(self, TaskDir: Path) -> dict | None:
         """从目录加载任务"""
@@ -124,6 +128,7 @@ class TaskManager:
             "Status": TaskStatus.Queued.value,
             "Progress": 0,
         }
+        self.UrlIndex[Url] = Key
         self.SaveTask(Key)
         return Key
 
@@ -183,6 +188,13 @@ class TaskManager:
         for K, V in Fields.items():
             if K == "Status" and isinstance(V, TaskStatus):
                 V = V.value
+            # 更新 Url 时同步更新索引
+            if K == "Url":
+                OldUrl = self.Tasks[Key].get("Url")
+                if OldUrl and OldUrl in self.UrlIndex:
+                    del self.UrlIndex[OldUrl]
+                if V:
+                    self.UrlIndex[V] = Key
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
             if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "Priority"]:
@@ -195,10 +207,10 @@ class TaskManager:
         return self.Tasks.get(Key)
 
     def FindByUrl(self, Url: str) -> tuple[str, dict] | None:
-        """根据 URL 查找任务"""
-        for Key, Task in self.Tasks.items():
-            if Task["Url"] == Url:
-                return (Key, Task)
+        """根据 URL 查找任务（O(1) 索引查找）"""
+        Key = self.UrlIndex.get(Url)
+        if Key and Key in self.Tasks:
+            return (Key, self.Tasks[Key])
         return None
 
     def GetAll(self) -> list[tuple[str, dict]]:
@@ -210,6 +222,9 @@ class TaskManager:
     def Delete(self, Key: str):
         """删除任务（包括文件夹）"""
         if Key in self.Tasks:
+            Url = self.Tasks[Key].get("Url")
+            if Url and Url in self.UrlIndex:
+                del self.UrlIndex[Url]
             del self.Tasks[Key]
         TaskDir = GetTasksDir() / Key
         if TaskDir.exists():
