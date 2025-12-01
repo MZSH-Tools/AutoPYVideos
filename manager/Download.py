@@ -85,13 +85,10 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
     Proxy = GetProxy()
     Options = {
         "outtmpl": OutputTemplate,
-        # 优先下载带音频的格式，限制最高1080p
-        "format": "best[height<=1080][ext=mp4][acodec!=none]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
+        # 只下载单一格式（已包含音视频），避免分流下载合并导致流量翻倍
+        # 优先级：1080p带音频 > 720p带音频 > 480p带音频 > 任意带音频
+        "format": "best[height<=1080][acodec!=none]/best[height<=720][acodec!=none]/best[height<=480][acodec!=none]/best[acodec!=none]",
         "merge_output_format": "mp4",
-        "postprocessors": [{
-            "key": "FFmpegVideoConvertor",
-            "preferedformat": "mp4",
-        }],
         "quiet": True,
         "no_warnings": True,
         "continuedl": True,
