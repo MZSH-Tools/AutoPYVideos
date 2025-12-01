@@ -38,17 +38,33 @@ CurrentProcessingKey = None
 # 暂停状态（暂停后当前阶段会完成，但不会进入下一阶段）
 IsPaused = False
 
+# 延迟重启状态（当前流程完成后重启）
+IsDelayedRestart = False
+
 # 暂停状态变化信号
 class PauseSignal(QObject):
     Changed = Signal(bool)  # IsPaused
 PauseEmitter = PauseSignal()
 
+# 延迟重启状态变化信号
+class DelayedRestartSignal(QObject):
+    Changed = Signal(bool)  # IsDelayedRestart
+    DoRestart = Signal()    # 触发实际重启
+DelayedRestartEmitter = DelayedRestartSignal()
+
 
 def SetPaused(Paused: bool):
-    """设置暂停状态（全局操作，不记录到任务日志）"""
+    """设置延迟暂停状态（全局操作，不记录到任务日志）"""
     global IsPaused
     IsPaused = Paused
     PauseEmitter.Changed.emit(Paused)
+
+
+def SetDelayedRestart(DelayedRestart: bool):
+    """设置延迟重启状态"""
+    global IsDelayedRestart
+    IsDelayedRestart = DelayedRestart
+    DelayedRestartEmitter.Changed.emit(DelayedRestart)
 
 
 def Log(Msg: str, Key: str = None):
@@ -487,6 +503,8 @@ class MainWindow(QMainWindow):
         self.SetupUI()
         # 监听暂停状态变化
         PauseEmitter.Changed.connect(self.OnPauseChanged)
+        # 监听延迟重启状态变化
+        DelayedRestartEmitter.Changed.connect(self.OnDelayedRestartChanged)
         # 定时刷新日志显示
         self.LogTimer = QTimer(self)
         self.LogTimer.timeout.connect(self.RefreshLogDisplay)
@@ -958,6 +976,11 @@ class MainWindow(QMainWindow):
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
 
+        # 检查延迟重启：没有任务在处理时触发重启
+        if IsDelayedRestart:
+            DelayedRestartEmitter.DoRestart.emit()
+            return
+
         # 如果暂停中，不启动新任务
         if IsPaused:
             return
@@ -1022,10 +1045,21 @@ class MainWindow(QMainWindow):
             # 恢复后尝试继续处理
             self.TryStartProcessing()
 
+    def OnDelayedRestartChanged(self, DelayedRestart: bool):
+        """延迟重启状态变化"""
+        self.UpdateStatusLabel()
+        if DelayedRestart:
+            # 如果没有任务在处理，立即触发重启
+            if not (self.ProcessThread and self.ProcessThread.isRunning()):
+                DelayedRestartEmitter.DoRestart.emit()
+
     def UpdateStatusLabel(self):
         """更新运行状态标签"""
-        if IsPaused:
-            self.StatusLabel.setText("● 已暂停")
+        if IsDelayedRestart:
+            self.StatusLabel.setText("● 待重启")
+            self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #FF5722; padding: 10px 5px;")
+        elif IsPaused:
+            self.StatusLabel.setText("● 待暂停")
             self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFC107; padding: 10px 5px;")
         else:
             self.StatusLabel.setText("● 运行中")

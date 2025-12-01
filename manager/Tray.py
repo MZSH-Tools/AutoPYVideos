@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 from PySide6.QtCore import QObject, Signal, QProcess
 
-from MainWindow import MainWindow, IsPaused, SetPaused, PauseEmitter
+from MainWindow import MainWindow, IsPaused, SetPaused, PauseEmitter, SetDelayedRestart, DelayedRestartEmitter
 
 
 class TrayIcon(QObject):
@@ -47,8 +47,8 @@ class TrayIcon(QObject):
 
         Menu.addSeparator()
 
-        # 暂停/恢复菜单项
-        self.PauseAction = QAction("暂停处理", Menu)
+        # 延迟暂停菜单项（当前阶段完成后暂停）
+        self.PauseAction = QAction("延迟暂停", Menu)
         self.PauseAction.setCheckable(True)
         self.PauseAction.setChecked(IsPaused)
         self.PauseAction.triggered.connect(self.TogglePause)
@@ -58,9 +58,20 @@ class TrayIcon(QObject):
 
         Menu.addSeparator()
 
-        RestartAction = QAction("重启服务", Menu)
+        # 立即重启
+        RestartAction = QAction("立即重启", Menu)
         RestartAction.triggered.connect(self.Restart)
         Menu.addAction(RestartAction)
+
+        # 延迟重启菜单项（当前流程完成后重启）
+        self.DelayedRestartAction = QAction("延迟重启", Menu)
+        self.DelayedRestartAction.setCheckable(True)
+        self.DelayedRestartAction.setChecked(False)
+        self.DelayedRestartAction.triggered.connect(self.ToggleDelayedRestart)
+        Menu.addAction(self.DelayedRestartAction)
+        # 监听延迟重启状态变化
+        DelayedRestartEmitter.Changed.connect(self.OnDelayedRestartChanged)
+        DelayedRestartEmitter.DoRestart.connect(self.DoSilentRestart)
 
         QuitAction = QAction("退出", Menu)
         QuitAction.triggered.connect(self.Quit)
@@ -70,8 +81,9 @@ class TrayIcon(QObject):
         self.TrayIcon.activated.connect(self.OnTrayActivated)
         self.TrayIcon.show()
 
-        # 首次运行弹出管理界面
-        self.ShowMainWindow()
+        # 首次运行：只创建 MainWindow 不显示（统一静默模式）
+        self.MainWin = MainWindow()
+        self.MainWin.Closed.connect(self.OnWindowClosed)
 
     def ShowMainWindow(self):
         """显示主窗口"""
@@ -88,26 +100,38 @@ class TrayIcon(QObject):
         pass
 
     def TogglePause(self, Checked: bool):
-        """切换暂停状态"""
+        """切换延迟暂停状态"""
         SetPaused(Checked)
 
     def OnPauseChanged(self, Paused: bool):
         """暂停状态变化时更新菜单项"""
         self.PauseAction.setChecked(Paused)
 
+    def ToggleDelayedRestart(self, Checked: bool):
+        """切换延迟重启状态"""
+        SetDelayedRestart(Checked)
+
+    def OnDelayedRestartChanged(self, DelayedRestart: bool):
+        """延迟重启状态变化时更新菜单项"""
+        self.DelayedRestartAction.setChecked(DelayedRestart)
+
     def OnTrayActivated(self, Reason):
         """托盘图标被激活"""
         if Reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.ShowMainWindow()
 
-    def Restart(self):
-        """重启程序"""
+    def DoSilentRestart(self):
+        """执行静默重启"""
         if self.MainWin:
-            self.MainWin.close()
+            self.MainWin.hide()
         self.TrayIcon.hide()
         # 启动新进程
         QProcess.startDetached(sys.executable, sys.argv, os.getcwd())
         self.App.quit()
+
+    def Restart(self):
+        """立即重启程序（静默）"""
+        self.DoSilentRestart()
 
     def Quit(self):
         """退出程序"""
