@@ -63,6 +63,9 @@ def RecognizeAudio(AudioPath: Path, OutputSrt: Path = None, Language: str = "en"
         # 关闭 LLM 重新断句（使用整体识别的原始断句）
         config.settings['rephrase'] = 0
 
+        # 确保临时目录存在
+        Path(config.TEMP_DIR).mkdir(parents=True, exist_ok=True)
+
         # 清理可能残留的锁文件和进程状态（解决识别卡住问题）
         config.model_process = None
         LockFiles = glob.glob(config.TEMP_DIR + '/*.lock')
