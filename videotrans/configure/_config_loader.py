@@ -227,7 +227,7 @@ def parse_init(update_data=None):
         "Whisper.cpp": "",
         "faster_batch":False,
         "Whisper.cpp.models": "ggml-tiny.bin,ggml-base.bin,ggml-small.bin,ggml-medium.bin,ggml-large-v1.bin,ggml-large-v2.bin,ggml-large-v3.bin,ggml-large-v3-turbo.bin",
-        "crf": 23,
+        "crf": 26,
         "edgetts_max_concurrent_tasks":10,
         "edgetts_retry_nums":3,
         "force_lib": False,
@@ -235,7 +235,7 @@ def parse_init(update_data=None):
         "ffmpeg_cmd": "",
         "aisendsrt": True,
         "dont_notify": False,
-        "video_codec": 264,
+        "video_codec": 265,
         
         "noise_separate_nums":4,
         
