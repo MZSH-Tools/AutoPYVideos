@@ -33,19 +33,43 @@ def FetchVideoInfo(Url: str) -> dict | None:
 
 
 class DownloadProgress:
-    """下载进度回调包装"""
+    """下载进度回调包装，合并多流下载为单一进度"""
     def __init__(self, Callback):
         self.Callback = Callback
+        self.TotalBytes = 0  # 累计总大小
+        self.DownloadedBytes = 0  # 累计已下载
+        self.StreamSizes = {}  # 记录每个流的大小 {filename: total_bytes}
+        self.StreamDownloaded = {}  # 记录每个流已下载 {filename: downloaded_bytes}
+        self.LastPercent = -1  # 避免重复回调相同进度
 
     def __call__(self, D: dict):
         if D["status"] == "downloading":
+            Filename = D.get("filename", "unknown")
             Total = D.get("total_bytes") or D.get("total_bytes_estimate", 0)
             Downloaded = D.get("downloaded_bytes", 0)
             Speed = D.get("speed", 0)
-            Percent = int(Downloaded * 100 / Total) if Total > 0 else 0
-            self.Callback(Percent, "downloading", Speed)
+
+            # 更新当前流的信息
+            if Total > 0:
+                self.StreamSizes[Filename] = Total
+            self.StreamDownloaded[Filename] = Downloaded
+
+            # 计算总进度
+            TotalAll = sum(self.StreamSizes.values())
+            DownloadedAll = sum(self.StreamDownloaded.values())
+            Percent = int(DownloadedAll * 100 / TotalAll) if TotalAll > 0 else 0
+
+            # 只在进度变化时回调
+            if Percent != self.LastPercent:
+                self.LastPercent = Percent
+                self.Callback(Percent, "downloading", Speed)
+
         elif D["status"] == "finished":
-            self.Callback(100, "finished", 0)
+            # 单个流完成，不触发总完成
+            pass
+
+        elif D["status"] == "error":
+            self.Callback(self.LastPercent, "error", 0)
 
 
 def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | None:
@@ -84,6 +108,8 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
             VideoId = Info.get("id", "")
             for File in OutputDir.iterdir():
                 if File.stem == VideoId and File.suffix == ".mp4":
+                    if ProgressCallback:
+                        ProgressCallback(100, "finished", 0)
                     return File
             return None
     except Exception as E:
