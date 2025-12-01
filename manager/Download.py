@@ -1,5 +1,6 @@
 # 视频下载模块
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 
 def GetProxy() -> str | None:
@@ -16,7 +17,8 @@ def FetchVideoInfo(Url: str) -> dict | None:
     try:
         import yt_dlp
         Proxy = GetProxy()
-        Options = {"quiet": True, "no_warnings": True}
+        # noplaylist: 确保从播放列表链接中提取单个视频而非播放列表
+        Options = {"quiet": True, "no_warnings": True, "noplaylist": True}
         if Proxy:
             Options["proxy"] = Proxy
         with yt_dlp.YoutubeDL(Options) as Ydl:
@@ -36,8 +38,6 @@ class DownloadProgress:
     """下载进度回调包装，合并多流下载为单一进度"""
     def __init__(self, Callback):
         self.Callback = Callback
-        self.TotalBytes = 0  # 累计总大小
-        self.DownloadedBytes = 0  # 累计已下载
         self.StreamSizes = {}  # 记录每个流的大小 {filename: total_bytes}
         self.StreamDownloaded = {}  # 记录每个流已下载 {filename: downloaded_bytes}
         self.LastPercent = -1  # 避免重复回调相同进度
@@ -92,6 +92,7 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
         "quiet": True,
         "no_warnings": True,
         "continuedl": True,
+        "noplaylist": True,  # 确保只下载单个视频而非整个播放列表
     }
     if Proxy:
         Options["proxy"] = Proxy
@@ -114,12 +115,38 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
         return None
 
 
+def IsPlaylistUrl(Url: str) -> bool:
+    """判断 URL 是否为播放列表（playlist?list=xxx 格式）"""
+    try:
+        Parsed = urlparse(Url)
+        # 只有 /playlist 路径才是播放列表，watch?v=xxx&list=yyy 是单个视频
+        return Parsed.path == "/playlist" and "list" in parse_qs(Parsed.query)
+    except:
+        return False
+
+
+def CleanVideoUrl(Url: str) -> str:
+    """清理视频 URL，只保留 watch?v=xxx，去除 list/index 等参数"""
+    try:
+        Parsed = urlparse(Url)
+        # 只处理 /watch 路径
+        if Parsed.path != "/watch":
+            return Url
+        Query = parse_qs(Parsed.query)
+        VideoId = Query.get("v")
+        if VideoId:
+            return f"https://www.youtube.com/watch?v={VideoId[0]}"
+        return Url
+    except:
+        return Url
+
+
 def ValidateUrl(Url: str) -> bool:
     """验证链接是否有效（能否被 yt-dlp 识别）"""
     try:
         import yt_dlp
         Proxy = GetProxy()
-        Options = {"quiet": True, "no_warnings": True, "extract_flat": True}
+        Options = {"quiet": True, "no_warnings": True, "extract_flat": True, "noplaylist": True}
         if Proxy:
             Options["proxy"] = Proxy
         with yt_dlp.YoutubeDL(Options) as Ydl:
@@ -129,28 +156,47 @@ def ValidateUrl(Url: str) -> bool:
         return False
 
 
+def ExtractPlaylistId(Url: str) -> str | None:
+    """从 URL 中提取播放列表 ID"""
+    try:
+        Parsed = urlparse(Url)
+        Query = parse_qs(Parsed.query)
+        ListIds = Query.get("list")
+        return ListIds[0] if ListIds else None
+    except:
+        return None
+
+
 def FetchPlaylistUrls(Url: str) -> list[str] | None:
-    """获取播放列表中所有视频的 URL，失败返回 None"""
+    """获取播放列表中所有视频的 URL，失败返回 None。返回的 URL 都是干净的 watch?v=xxx 格式"""
     try:
         import yt_dlp
+
+        # 如果不是播放列表链接，直接返回清理后的单个 URL
+        if not IsPlaylistUrl(Url):
+            return [CleanVideoUrl(Url)]
+
+        # 从 URL 提取播放列表 ID，构造纯播放列表链接
+        PlaylistId = ExtractPlaylistId(Url)
+        if not PlaylistId:
+            return [CleanVideoUrl(Url)]
+        PlaylistUrl = f"https://www.youtube.com/playlist?list={PlaylistId}"
+
         Proxy = GetProxy()
         Options = {"quiet": True, "no_warnings": True, "extract_flat": True}
         if Proxy:
             Options["proxy"] = Proxy
         with yt_dlp.YoutubeDL(Options) as Ydl:
-            Info = Ydl.extract_info(Url, download=False)
-            # 判断是否为播放列表
+            Info = Ydl.extract_info(PlaylistUrl, download=False)
+            # 提取播放列表中所有视频，返回干净的 URL
             if Info.get("_type") == "playlist" and "entries" in Info:
                 Urls = []
                 for Entry in Info["entries"]:
-                    if Entry and Entry.get("url"):
-                        Urls.append(Entry["url"])
-                    elif Entry and Entry.get("id"):
+                    if Entry and Entry.get("id"):
                         Urls.append(f"https://www.youtube.com/watch?v={Entry['id']}")
-                return Urls
-            # 单个视频返回包含该视频的列表
-            elif Info.get("id"):
-                return [Url]
+                    elif Entry and Entry.get("url"):
+                        Urls.append(CleanVideoUrl(Entry["url"]))
+                return Urls if Urls else None
             return None
     except Exception as E:
         print(f"FetchPlaylistUrls error: {E}")
