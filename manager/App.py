@@ -1,27 +1,10 @@
 # 应用程序入口
 import os
 import sys
-import shutil
-from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtCore import QObject, Signal
 
-
-def CleanupOldTmp():
-    """清理旧的 tmp 文件夹（保留当前进程的）"""
-    RootDir = Path(__file__).parent.parent
-    CurTmp = f'tmp{os.getpid()}'
-    for Item in RootDir.iterdir():
-        if Item.is_dir() and Item.name.startswith('tmp') and Item.name != CurTmp:
-            try:
-                shutil.rmtree(Item)
-            except:
-                pass
-
-
-# 清理旧的临时文件夹
-CleanupOldTmp()
 
 # 配置 FFmpeg 路径（跨平台）
 if sys.platform == "win32":
