@@ -239,11 +239,12 @@ class TaskManager:
         """归档任务：验证链接、保存、清理缓存，返回 (成功, 消息)"""
         from Publish import ValidateUrl, CleanupTaskCache
 
-        Valid, Error = ValidateUrl(PublishUrl)
+        Valid, Error, ExtractedUrl = ValidateUrl(PublishUrl)
         if not Valid:
             return False, f"链接验证失败: {Error}"
 
-        self.Update(Key, PublishUrl=PublishUrl)
+        # 只保存提取出的纯 URL
+        self.Update(Key, PublishUrl=ExtractedUrl)
         Count = CleanupTaskCache(self.GetTaskDir(Key))
         return True, f"已发布，清理 {Count} 个缓存文件"
 
