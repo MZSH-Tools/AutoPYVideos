@@ -101,9 +101,16 @@ class TaskManager:
         TaskDir.mkdir(parents=True, exist_ok=True)
         return TaskDir
 
+    def GenerateKey(self) -> str:
+        """生成唯一时间戳 Key，如果冲突则 +1 秒"""
+        Key = str(int(time.time() * 1000))
+        while Key in self.Tasks:
+            Key = str(int(Key) + 1000)  # +1 秒
+        return Key
+
     def Add(self, Url: str) -> str:
         """添加任务，返回时间戳 Key"""
-        Key = str(int(time.time() * 1000))
+        Key = self.GenerateKey()
         self.Tasks[Key] = {
             "Url": Url,
             "Title": "",

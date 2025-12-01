@@ -12,6 +12,7 @@ from PySide6.QtGui import QCloseEvent, QColor, QAction
 from pathlib import Path
 from Task import TaskManager, TaskStatus
 from Storage import LoadSettings, SaveSettings
+from Download import FetchPlaylistUrls
 import Log as LogModule
 from Extract import ExtractAudio
 import Config
@@ -91,6 +92,19 @@ class FetchInfoThread(QThread):
     def run(self):
         Success = self.TaskMgr.FetchInfo(self.Key)
         self.Finished.emit(self.Key, Success)
+
+
+class FetchPlaylistThread(QThread):
+    """后台获取播放列表的线程"""
+    Finished = Signal(list)  # Urls (空列表表示失败)
+
+    def __init__(self, Url: str):
+        super().__init__()
+        self.Url = Url
+
+    def run(self):
+        Urls = FetchPlaylistUrls(self.Url)
+        self.Finished.emit(Urls if Urls else [])
 
 
 class ProcessThread(QThread):
@@ -500,13 +514,22 @@ class MainWindow(QMainWindow):
         Layout = QVBoxLayout(Central)
 
         # 顶部区域：搜索栏 + 全局设置
+        TopContainer = QVBoxLayout()
         TopLayout = QHBoxLayout()
 
         # 搜索栏
         self.UrlInput = QLineEdit()
         self.UrlInput.setPlaceholderText("输入 YouTube 链接...")
         self.UrlInput.returnPressed.connect(self.OnSearch)
+        self.UrlInput.textChanged.connect(self.OnUrlInputChanged)
         TopLayout.addWidget(self.UrlInput)
+
+        # 清除按钮
+        self.ClearBtn = QPushButton("✕")
+        self.ClearBtn.setFixedWidth(30)
+        self.ClearBtn.clicked.connect(self.OnClearSearch)
+        self.ClearBtn.setVisible(False)
+        TopLayout.addWidget(self.ClearBtn)
 
         self.SearchBtn = QPushButton("🔍")
         self.SearchBtn.setFixedWidth(40)
@@ -530,7 +553,18 @@ class MainWindow(QMainWindow):
         self.TitleSuffixEdit.editingFinished.connect(self.OnSettingsChanged)
         TopLayout.addWidget(self.TitleSuffixEdit)
 
-        Layout.addLayout(TopLayout)
+        TopContainer.addLayout(TopLayout)
+
+        # 错误提示标签
+        self.UrlErrorLabel = QLabel()
+        self.UrlErrorLabel.setStyleSheet("color: #cc0000; font-size: 12px; padding-left: 5px;")
+        self.UrlErrorLabel.setVisible(False)
+        TopContainer.addWidget(self.UrlErrorLabel)
+
+        Layout.addLayout(TopContainer)
+
+        # 筛选状态
+        self.FilterKeys = None  # None=不筛选, list=筛选指定 Key
 
         # 第二行：简介附加（多行输入，全局设置）
         DescExtraLayout = QHBoxLayout()
@@ -790,20 +824,92 @@ class MainWindow(QMainWindow):
         if not Url:
             return
 
-        Found = self.TaskMgr.FindByUrl(Url)
-        if Found:
-            Key, Task = Found
-            self.RefreshList()
-            self.SelectTask(Key)
-        else:
-            Key = self.TaskMgr.Add(Url)
-            self.RefreshList()
-            self.SelectTask(Key)
-            Log(f"任务已添加，获取信息中...", Key)
-            # 后台获取视频信息
-            self.StartFetchInfo(Key, Url)
+        # 隐藏错误提示
+        self.UrlErrorLabel.setVisible(False)
 
+        # 禁用搜索栏，启动超时计时器
+        self.SetSearchEnabled(False)
+        self.SearchTimeout = QTimer()
+        self.SearchTimeout.setSingleShot(True)
+        self.SearchTimeout.timeout.connect(self.OnSearchTimeout)
+        self.SearchTimeout.start(10000)  # 10 秒超时
+        self.SearchCancelled = False  # 标记是否已取消
+
+        # 启动后台解析
+        self.PlaylistThread = FetchPlaylistThread(Url)
+        self.PlaylistThread.Finished.connect(self.OnPlaylistFetched)
+        self.PlaylistThread.start()
+
+    def OnSearchTimeout(self):
+        """搜索超时"""
+        self.SearchCancelled = True  # 标记已取消，忽略后续回调
+        self.SetSearchEnabled(True)
+        self.ShowUrlError("网络超时，请检查网络后重试")
+
+    def OnPlaylistFetched(self, Urls: list):
+        """播放列表解析完成"""
+        # 停止超时计时器
+        if hasattr(self, "SearchTimeout") and self.SearchTimeout:
+            self.SearchTimeout.stop()
+
+        # 如果已超时取消，忽略此次回调
+        if getattr(self, "SearchCancelled", False):
+            return
+
+        # 恢复搜索栏
+        self.SetSearchEnabled(True)
+
+        # 解析失败
+        if not Urls:
+            self.ShowUrlError("输入链接无效，请重新输入")
+            return
+
+        # 添加任务并筛选
+        AddedKeys = []
+        ExistingKeys = []
+        for Url in Urls:
+            Found = self.TaskMgr.FindByUrl(Url)
+            if Found:
+                ExistingKeys.append(Found[0])
+            else:
+                Key = self.TaskMgr.Add(Url)
+                AddedKeys.append(Key)
+                # 后台获取视频信息
+                self.StartFetchInfo(Key, Url)
+
+        # 设置筛选并刷新
+        self.FilterKeys = AddedKeys + ExistingKeys
+        self.ClearBtn.setVisible(True)
+        self.RefreshList()
+
+        # 选中第一个任务
+        if AddedKeys:
+            self.SelectTask(AddedKeys[0])
+        elif ExistingKeys:
+            self.SelectTask(ExistingKeys[0])
+
+    def SetSearchEnabled(self, Enabled: bool):
+        """启用/禁用搜索栏"""
+        self.UrlInput.setEnabled(Enabled)
+        self.SearchBtn.setEnabled(Enabled)
+        self.ClearBtn.setEnabled(Enabled)
+
+    def ShowUrlError(self, Msg: str):
+        """显示 URL 错误提示"""
+        self.UrlErrorLabel.setText(f"⚠ {Msg}")
+        self.UrlErrorLabel.setVisible(True)
+
+    def OnUrlInputChanged(self, Text: str):
+        """输入框内容变化时隐藏错误提示"""
+        self.UrlErrorLabel.setVisible(False)
+
+    def OnClearSearch(self):
+        """清除搜索并取消筛选"""
         self.UrlInput.clear()
+        self.FilterKeys = None
+        self.ClearBtn.setVisible(False)
+        self.UrlErrorLabel.setVisible(False)
+        self.RefreshList()
 
     def StartFetchInfo(self, Key: str, Url: str):
         """启动后台获取视频信息"""
@@ -1032,7 +1138,7 @@ class MainWindow(QMainWindow):
             self.DetailProgressLabel.setText(f"{Percent}%")
 
     def RefreshList(self):
-        """刷新任务列表（保持选中状态）"""
+        """刷新任务列表（保持选中状态，支持筛选）"""
         # 记住当前选中的 Key
         SelectedKey = self.CurKey
         # 阻止信号避免触发 OnTaskSelected
@@ -1040,6 +1146,9 @@ class MainWindow(QMainWindow):
         self.TaskList.clear()
         Tasks = self.TaskMgr.GetAll()
         for Key, Task in Tasks:
+            # 筛选逻辑
+            if self.FilterKeys is not None and Key not in self.FilterKeys:
+                continue
             Item = self.CreateListItem(Key, Task)
             self.TaskList.addItem(Item)
         # 恢复选中

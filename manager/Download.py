@@ -89,3 +89,46 @@ def DownloadVideo(Url: str, OutputDir: Path, ProgressCallback=None) -> Path | No
     except Exception as E:
         print(f"Download error: {E}")
         return None
+
+
+def ValidateUrl(Url: str) -> bool:
+    """验证链接是否有效（能否被 yt-dlp 识别）"""
+    try:
+        import yt_dlp
+        Proxy = GetProxy()
+        Options = {"quiet": True, "no_warnings": True, "extract_flat": True}
+        if Proxy:
+            Options["proxy"] = Proxy
+        with yt_dlp.YoutubeDL(Options) as Ydl:
+            Ydl.extract_info(Url, download=False)
+            return True
+    except:
+        return False
+
+
+def FetchPlaylistUrls(Url: str) -> list[str] | None:
+    """获取播放列表中所有视频的 URL，失败返回 None"""
+    try:
+        import yt_dlp
+        Proxy = GetProxy()
+        Options = {"quiet": True, "no_warnings": True, "extract_flat": True}
+        if Proxy:
+            Options["proxy"] = Proxy
+        with yt_dlp.YoutubeDL(Options) as Ydl:
+            Info = Ydl.extract_info(Url, download=False)
+            # 判断是否为播放列表
+            if Info.get("_type") == "playlist" and "entries" in Info:
+                Urls = []
+                for Entry in Info["entries"]:
+                    if Entry and Entry.get("url"):
+                        Urls.append(Entry["url"])
+                    elif Entry and Entry.get("id"):
+                        Urls.append(f"https://www.youtube.com/watch?v={Entry['id']}")
+                return Urls
+            # 单个视频返回包含该视频的列表
+            elif Info.get("id"):
+                return [Url]
+            return None
+    except Exception as E:
+        print(f"FetchPlaylistUrls error: {E}")
+        return None
