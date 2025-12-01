@@ -6,6 +6,13 @@ from pathlib import Path
 
 def GetDataDir() -> Path:
     """获取数据目录"""
+    # 优先使用外置硬盘缓存目录
+    ExternalCache = Path("/Volumes/MyNas/Cache/AutoPYVideos")
+    if ExternalCache.exists() or (ExternalCache.parent.exists() and ExternalCache.parent.parent.exists()):
+        ExternalCache.mkdir(parents=True, exist_ok=True)
+        return ExternalCache
+
+    # 回退到本地目录
     if os.name == "nt":
         Base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
