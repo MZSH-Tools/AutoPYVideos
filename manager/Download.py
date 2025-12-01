@@ -1,6 +1,7 @@
 # 视频下载模块
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+import requests
 
 
 def GetProxy() -> str | None:
@@ -10,6 +11,23 @@ def GetProxy() -> str | None:
         return config.proxy if config.proxy else None
     except:
         return None
+
+
+def DownloadThumbnail(Url: str, OutputDir: Path) -> str:
+    """下载封面图片到指定目录，返回本地路径（失败返回空字符串）"""
+    try:
+        OutputDir.mkdir(parents=True, exist_ok=True)
+        OutputPath = OutputDir / "thumbnail.jpg"
+        Proxy = GetProxy()
+        Proxies = {"http": Proxy, "https": Proxy} if Proxy else None
+        Resp = requests.get(Url, proxies=Proxies, timeout=30)
+        if Resp.status_code == 200:
+            with open(OutputPath, "wb") as F:
+                F.write(Resp.content)
+            return str(OutputPath)
+    except Exception as E:
+        print(f"DownloadThumbnail error: {E}")
+    return ""
 
 
 def FetchVideoInfo(Url: str) -> dict | None:

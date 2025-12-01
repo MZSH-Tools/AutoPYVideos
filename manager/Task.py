@@ -6,7 +6,7 @@ from pathlib import Path
 from enum import Enum
 
 from Storage import GetTasksDir, ListTaskDirs
-from Download import FetchVideoInfo, DownloadVideo
+from Download import FetchVideoInfo, DownloadVideo, DownloadThumbnail
 
 
 class TaskStatus(Enum):
@@ -142,10 +142,15 @@ class TaskManager:
         Info = FetchVideoInfo(Task["Url"])
         if Info:
             print(f"获取信息: 标题='{Info['Title']}', 作者='{Info['Author']}'")
+            # 下载封面到任务目录
+            ThumbnailPath = ""
+            if Info["Thumbnail"]:
+                TaskDir = self.GetTaskDir(Key)
+                ThumbnailPath = DownloadThumbnail(Info["Thumbnail"], TaskDir)
             self.Update(Key,
                 Title=Info["Title"],
                 Author=Info["Author"],
-                Thumbnail=Info["Thumbnail"],
+                Thumbnail=ThumbnailPath,  # 存本地路径而非 URL
                 VideoId=Info["VideoId"]
             )
             return True
