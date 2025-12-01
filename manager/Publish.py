@@ -30,11 +30,11 @@ def ValidateUrl(Url: str) -> tuple[bool, str]:
 
 
 def CleanupTaskCache(TaskDir: Path) -> int:
-    """清理任务缓存文件，只保留 info.json 和 log.txt，返回删除数量"""
+    """清理任务缓存文件，只保留 info.json、log.txt 和 thumbnail.jpg，返回删除数量"""
     if not TaskDir.exists():
         return 0
 
-    KeepFiles = {"info.json", "log.txt"}
+    KeepFiles = {"info.json", "log.txt", "thumbnail.jpg"}
     Count = 0
 
     for Item in TaskDir.iterdir():
