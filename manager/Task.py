@@ -243,8 +243,8 @@ class TaskManager:
         if not Valid:
             return False, f"链接验证失败: {Error}"
 
-        # 只保存提取出的纯 URL
-        self.Update(Key, PublishUrl=ExtractedUrl)
+        # 只保存提取出的纯 URL，同时更新状态
+        self.Update(Key, PublishUrl=ExtractedUrl, Status=TaskStatus.Published)
         Count = CleanupTaskCache(self.GetTaskDir(Key))
         return True, f"已发布，清理 {Count} 个缓存文件"
 
