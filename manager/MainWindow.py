@@ -196,8 +196,8 @@ class ProcessThread(QThread):
         try:
             # 阶段 1: 下载视频
             if not VideoPath.exists():
-                if IsPaused:
-                    Log(f"任务在下载前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在下载前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -230,8 +230,8 @@ class ProcessThread(QThread):
 
             # 阶段 2: 提取音频
             if not AudioPath.exists():
-                if IsPaused:
-                    Log(f"任务在提取前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在提取前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -263,8 +263,8 @@ class ProcessThread(QThread):
 
             # 阶段 3: 语音识别
             if not EnSrtPath.exists():
-                if IsPaused:
-                    Log(f"任务在识别前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在识别前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -303,8 +303,8 @@ class ProcessThread(QThread):
 
             # 阶段 4: 翻译（英文 → 中文）
             if not ZhSrtPath.exists():
-                if IsPaused:
-                    Log(f"任务在翻译前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在翻译前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -346,8 +346,8 @@ class ProcessThread(QThread):
             # 阶段 5: 配音（中文 TTS）
             AlignedSrtPath = TaskDir / "aligned.srt"  # 对齐后的字幕（视频慢速时生成）
             if not ZhAudioPath.exists():
-                if IsPaused:
-                    Log(f"任务在配音前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在配音前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -409,8 +409,8 @@ class ProcessThread(QThread):
 
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
-                if IsPaused:
-                    Log(f"任务在合成前暂停")
+                if IsPaused or IsDelayedRestart:
+                    Log(f"任务在合成前{'暂停' if IsPaused else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -1365,7 +1365,7 @@ class MainWindow(QMainWindow):
 
         Log(f"验证链接: {Url}", self.CurKey)
         Success, Msg = self.TaskMgr.Archive(self.CurKey, Url)
-        Log(Msg, self.CurKey)
+        Log(Msg, "")  # 传空Key，避免清理后又创建日志文件
 
         if Success:
             self.RefreshList()
