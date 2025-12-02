@@ -4,7 +4,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFrame, QSplitter, QApplication, QTextEdit, QMenu, QMessageBox
+    QLabel, QFrame, QSplitter, QApplication, QTextEdit, QMenu, QMessageBox, QCheckBox
 )
 from PySide6.QtCore import Signal, Qt, QThread, QObject, QTimer
 from PySide6.QtGui import QCloseEvent, QColor, QAction
@@ -610,14 +610,41 @@ class MainWindow(QMainWindow):
         Splitter = QSplitter(Qt.Orientation.Horizontal)
         Layout.addWidget(Splitter)
 
+        # 左侧面板（筛选器 + 任务列表）
+        LeftListPanel = QWidget()
+        LeftListLayout = QVBoxLayout(LeftListPanel)
+        LeftListLayout.setContentsMargins(0, 0, 0, 0)
+        LeftListLayout.setSpacing(5)
+
+        # 状态筛选器（仅搜索框为空时生效）
+        FilterLayout = QHBoxLayout()
+        FilterLayout.setSpacing(8)
+        self.FilterPublished = QCheckBox("已发布")
+        self.FilterReady = QCheckBox("待发布")
+        self.FilterQueued = QCheckBox("队列中")
+        # 默认仅显示队列中
+        self.FilterPublished.setChecked(False)
+        self.FilterReady.setChecked(False)
+        self.FilterQueued.setChecked(True)
+        # 连接信号
+        self.FilterPublished.stateChanged.connect(self.OnStatusFilterChanged)
+        self.FilterReady.stateChanged.connect(self.OnStatusFilterChanged)
+        self.FilterQueued.stateChanged.connect(self.OnStatusFilterChanged)
+        FilterLayout.addWidget(self.FilterPublished)
+        FilterLayout.addWidget(self.FilterReady)
+        FilterLayout.addWidget(self.FilterQueued)
+        FilterLayout.addStretch()
+        LeftListLayout.addLayout(FilterLayout)
+
         # 左侧任务列表
         self.TaskList = QListWidget()
-        self.TaskList.setMaximumWidth(250)
         self.TaskList.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.TaskList.currentItemChanged.connect(self.OnTaskSelected)
         self.TaskList.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.TaskList.customContextMenuRequested.connect(self.OnTaskContextMenu)
-        Splitter.addWidget(self.TaskList)
+        LeftListLayout.addWidget(self.TaskList)
+        LeftListPanel.setMaximumWidth(250)
+        Splitter.addWidget(LeftListPanel)
 
         # 右侧详情面板
         DetailPanel = QFrame()
@@ -1231,8 +1258,11 @@ class MainWindow(QMainWindow):
         self.TaskList.clear()
         Tasks = self.TaskMgr.GetAll()
         for Key, Task in Tasks:
-            # 筛选逻辑
+            # URL 筛选（搜索框有内容时）
             if self.FilterKeys is not None and Key not in self.FilterKeys:
+                continue
+            # 状态筛选（仅搜索框为空时生效）
+            if self.FilterKeys is None and not self._PassStatusFilter(Task["Status"]):
                 continue
             Item = self.CreateListItem(Key, Task)
             self.TaskList.addItem(Item)
@@ -1245,6 +1275,21 @@ class MainWindow(QMainWindow):
                     break
         self.TaskList.verticalScrollBar().setValue(ScrollPos)
         self.TaskList.blockSignals(False)
+
+    def _PassStatusFilter(self, Status: str) -> bool:
+        """检查状态是否通过筛选器"""
+        # 已发布
+        if Status == "published":
+            return self.FilterPublished.isChecked()
+        # 待发布
+        if Status == "ready":
+            return self.FilterReady.isChecked()
+        # 队列中（等待中、处理中、暂停、失败等）
+        return self.FilterQueued.isChecked()
+
+    def OnStatusFilterChanged(self, State: int):
+        """状态筛选器变化时刷新列表"""
+        self.RefreshList()
 
     def CreateListItem(self, Key: str, Task: dict) -> QListWidgetItem:
         """创建列表项"""
