@@ -12,6 +12,7 @@ from Download import FetchVideoInfo, DownloadVideo, DownloadThumbnail
 class TaskStatus(Enum):
     """任务状态"""
     Queued = "queued"
+    Validating = "validating"  # 校验/修复任务信息中
     Downloading = "downloading"
     Extracting = "extracting"
     Recognizing = "recognizing"
@@ -156,6 +157,151 @@ class TaskManager:
             return True
         print("获取信息: 获取失败")
         return False
+
+    def CheckInfo(self, Key: str) -> dict:
+        """检测任务信息问题，返回 {MissingTitle, MissingThumbnail, MissingTitleZh, ThumbnailPathInvalid}"""
+        Task = self.Get(Key)
+        if not Task:
+            return {}
+
+        TaskDir = self.GetTaskDir(Key)
+        ThumbnailPath = TaskDir / "thumbnail.jpg"
+        Thumb = Task.get("Thumbnail", "")
+        Title = Task.get("Title", "")
+        TitleZh = Task.get("TitleZh", "")
+
+        return {
+            "MissingTitle": not Title,
+            "MissingThumbnail": not ThumbnailPath.exists(),
+            "ThumbnailPathInvalid": ThumbnailPath.exists() and (not Thumb or Thumb.startswith("http")),
+            # 中文标题缺失或与英文标题相同（翻译失败）
+            "MissingTitleZh": Title and (not TitleZh or TitleZh == Title),
+        }
+
+    def CleanupPublishedTask(self, Key: str) -> int:
+        """清理已发布任务的所有文件（保留 info.json），返回清理文件数"""
+        TaskDir = self.GetTaskDir(Key)
+        Count = 0
+        for File in TaskDir.iterdir():
+            if File.name != "info.json":
+                try:
+                    File.unlink()
+                    Count += 1
+                except Exception:
+                    pass
+        return Count
+
+    def ValidateInfo(self, Key: str, TranslateFunc=None) -> dict:
+        """校验并修复任务信息，返回修复结果 {Fixed: [...], Failed: [], Cleaned: int}"""
+        Task = self.Get(Key)
+        if not Task:
+            return {"Fixed": [], "Failed": ["Task not found"], "Cleaned": 0}
+
+        # 已发布任务：清理所有文件（保留 info.json）
+        if Task.get("Status") == TaskStatus.Published.value:
+            Count = self.CleanupPublishedTask(Key)
+            return {"Fixed": [], "Failed": [], "Cleaned": Count}
+
+        # 先检测问题
+        Problems = self.CheckInfo(Key)
+        if not any(Problems.values()):
+            return {"Fixed": [], "Failed": [], "Cleaned": 0}
+
+        # 设置校验状态
+        OldStatus = Task.get("Status")
+        self.Tasks[Key]["Status"] = TaskStatus.Validating.value
+
+        Result = {"Fixed": [], "Failed": [], "Cleaned": 0}
+        TaskDir = self.GetTaskDir(Key)
+        ThumbnailPath = TaskDir / "thumbnail.jpg"
+        NeedSave = False
+        ThumbnailUrl = ""
+
+        try:
+            # 1. 修复基础信息（仅在缺失时获取）
+            if Problems["MissingTitle"]:
+                Info = FetchVideoInfo(Task["Url"])
+                if Info:
+                    if Info["Title"]:
+                        self.Tasks[Key]["Title"] = Info["Title"]
+                        Result["Fixed"].append("Title")
+                        NeedSave = True
+                    if Info["Author"] and not Task.get("Author"):
+                        self.Tasks[Key]["Author"] = Info["Author"]
+                        Result["Fixed"].append("Author")
+                        NeedSave = True
+                    if Info["VideoId"] and not Task.get("VideoId"):
+                        self.Tasks[Key]["VideoId"] = Info["VideoId"]
+                        Result["Fixed"].append("VideoId")
+                        NeedSave = True
+                    ThumbnailUrl = Info.get("Thumbnail", "")
+                else:
+                    Result["Failed"].append("FetchVideoInfo")
+
+            # 2. 修复封面（仅在文件缺失时下载）
+            if Problems["MissingThumbnail"]:
+                # 优先从已有 Thumbnail 字段获取 URL
+                if not ThumbnailUrl:
+                    Thumb = Task.get("Thumbnail", "")
+                    if Thumb.startswith("http"):
+                        ThumbnailUrl = Thumb
+                if ThumbnailUrl:
+                    LocalPath = DownloadThumbnail(ThumbnailUrl, TaskDir)
+                    if LocalPath:
+                        self.Tasks[Key]["Thumbnail"] = LocalPath
+                        Result["Fixed"].append("Thumbnail")
+                        NeedSave = True
+                    else:
+                        Result["Failed"].append("DownloadThumbnail")
+                else:
+                    Result["Failed"].append("NoThumbnailUrl")
+            elif Problems["ThumbnailPathInvalid"]:
+                # 封面文件存在但路径字段无效，直接修正
+                self.Tasks[Key]["Thumbnail"] = str(ThumbnailPath)
+                Result["Fixed"].append("ThumbnailPath")
+                NeedSave = True
+
+            # 3. 修复中文标题（仅在缺失或与英文相同时翻译）
+            if Problems["MissingTitleZh"] and TranslateFunc:
+                # 重新获取最新 Title（可能刚修复）
+                Title = self.Tasks[Key].get("Title", "")
+                if Title:
+                    try:
+                        TitleZh = TranslateFunc(Title, "en", "zh-cn")
+                        if TitleZh and TitleZh != Title:
+                            self.Tasks[Key]["TitleZh"] = TitleZh
+                            Result["Fixed"].append("TitleZh")
+                            NeedSave = True
+                        elif TitleZh == Title:
+                            Result["Failed"].append("TranslateSameAsOriginal")
+                    except Exception:
+                        Result["Failed"].append("TranslateTitle")
+
+            if NeedSave:
+                self.SaveTask(Key)
+        finally:
+            # 恢复原状态
+            self.Tasks[Key]["Status"] = OldStatus
+
+        return Result
+
+    def GetTasksNeedValidation(self) -> list[str]:
+        """获取需要校验的任务列表（所有任务：已发布需清理，未发布需检测信息）"""
+        Keys = []
+        for Key, Task in self.Tasks.items():
+            # 已发布任务：检查是否需要清理文件
+            if Task.get("Status") == TaskStatus.Published.value:
+                TaskDir = self.GetTaskDir(Key)
+                # 如果目录中有除 info.json 外的文件，需要清理
+                HasFiles = any(F.name != "info.json" for F in TaskDir.iterdir() if F.is_file())
+                if HasFiles:
+                    Keys.append(Key)
+                continue
+            # 未发布任务：检测信息问题
+            Problems = self.CheckInfo(Key)
+            if any(Problems.values()):
+                Keys.append(Key)
+        return Keys
 
     def Download(self, Key: str, ProgressCallback=None) -> bool:
         """下载视频"""
@@ -363,9 +509,11 @@ class TaskManager:
                     except Exception:
                         pass
 
-            # 更新状态为等待中
+            # 更新状态为等待中，清除发布链接
             self.Tasks[Key]["Status"] = TaskStatus.Queued.value
             self.Tasks[Key]["Progress"] = 0
             self.Tasks[Key]["Error"] = ""
+            self.Tasks[Key]["PublishUrl"] = ""  # 重置时清除发布链接
+            self.SaveTask(Key)
 
         return True

@@ -95,19 +95,40 @@ class LogWriter:
         pass
 
 
-class FetchInfoThread(QThread):
-    """后台获取视频信息的线程"""
-    Finished = Signal(str, bool)  # Key, Success
+class ValidateInfoThread(QThread):
+    """启动时后台校验任务信息的线程（逐个校验，非并发）"""
+    Started = Signal(int)  # Total count
+    TaskStarted = Signal(str)  # Key（开始校验某任务）
+    TaskFixed = Signal(str, list, list, int)  # Key, Fixed, Failed, Cleaned
+    Finished = Signal(int, int, int)  # FixedCount, FailedCount, CleanedCount
 
-    def __init__(self, TaskMgr: TaskManager, Key: str, Url: str):
+    def __init__(self, TaskMgr: TaskManager):
         super().__init__()
         self.TaskMgr = TaskMgr
-        self.Key = Key
-        self.Url = Url
 
     def run(self):
-        Success = self.TaskMgr.FetchInfo(self.Key)
-        self.Finished.emit(self.Key, Success)
+        Keys = self.TaskMgr.GetTasksNeedValidation()
+        Total = len(Keys)
+        if Total == 0:
+            self.Finished.emit(0, 0, 0)
+            return
+
+        self.Started.emit(Total)
+        FixedCount = 0
+        FailedCount = 0
+        CleanedCount = 0
+
+        for Key in Keys:
+            self.TaskStarted.emit(Key)
+            Result = self.TaskMgr.ValidateInfo(Key, TranslateFunc=TranslateText)
+            if Result["Fixed"]:
+                FixedCount += len(Result["Fixed"])
+            if Result["Failed"]:
+                FailedCount += len(Result["Failed"])
+            CleanedCount += Result.get("Cleaned", 0)
+            self.TaskFixed.emit(Key, Result["Fixed"], Result["Failed"], Result.get("Cleaned", 0))
+
+        self.Finished.emit(FixedCount, FailedCount, CleanedCount)
 
 
 class FetchPlaylistThread(QThread):
@@ -162,27 +183,16 @@ class ProcessThread(QThread):
             self.Finished.emit(self.Key, False, False)
             return
 
-        # 如果还没有视频信息，先获取
-        if not Task.get("Title"):
-            Log(f"获取视频信息...")
-            self.TaskMgr.FetchInfo(self.Key)
+        # 兜底：检测并修复任务信息（正常情况下启动时已校验过）
+        Problems = self.TaskMgr.CheckInfo(self.Key)
+        if any(Problems.values()):
+            Log(f"Validating task info...")
+            Result = self.TaskMgr.ValidateInfo(self.Key, TranslateFunc=TranslateText)
+            if Result["Fixed"]:
+                Log(f"Fixed: {', '.join(Result['Fixed'])}")
+            if Result["Failed"]:
+                Log(f"Failed to fix: {', '.join(Result['Failed'])}")
             Task = self.TaskMgr.Get(self.Key)  # 重新获取更新后的任务
-
-        # 如果还没翻译标题，先翻译（在下载前就可以看到中文标题预览）
-        if Task and Task.get("Title") and not Task.get("TitleZh"):
-            Log(f"翻译标题...")
-            try:
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as Executor:
-                    Future = Executor.submit(TranslateText, Task["Title"], "en", "zh-cn")
-                    TitleZh = Future.result(timeout=30)  # 30秒超时
-                if TitleZh:
-                    Log(f"标题翻译完成: {TitleZh}")
-                    self.TaskMgr.Update(self.Key, TitleZh=TitleZh)
-            except concurrent.futures.TimeoutError:
-                Log(f"标题翻译超时，跳过")
-            except Exception as E:
-                Log(f"标题翻译失败: {E}")
 
         TaskDir = self.TaskMgr.GetTaskDir(self.Key)
         VideoPath = TaskDir / "video.mp4"
@@ -475,6 +485,7 @@ class ProcessThread(QThread):
 # 状态对应颜色
 StatusColors = {
     "queued": "#888888",      # 灰色 - 等待中
+    "validating": "#607D8B",  # 蓝灰 - 校验中
     "downloading": "#2196F3", # 蓝色 - 下载中
     "extracting": "#9C27B0",  # 紫色 - 提取中
     "recognizing": "#FF9800", # 橙色 - 识别中
@@ -774,7 +785,10 @@ class MainWindow(QMainWindow):
         sys.stdout = LogWriter()
 
         # 存储后台线程
-        self.FetchThreads = []
+        self.ValidateThread = None
+
+        # 启动时先校验任务信息，校验完成后再启动正常处理
+        self.StartValidation()
 
     def AppendLog(self, Key: str, Msg: str, IsDebug: bool = False):
         """添加日志（Key为任务Key，空表示全局日志）- 只写入文件"""
@@ -892,8 +906,10 @@ class MainWindow(QMainWindow):
             else:
                 Key = self.TaskMgr.Add(Url)
                 AddedKeys.append(Key)
-                # 后台获取视频信息
-                self.StartFetchInfo(Key, Url)
+
+        # 有新任务则启动后台校验（单线程逐个校验）
+        if AddedKeys:
+            self.StartValidation()
 
         # 设置筛选并刷新
         self.FilterKeys = AddedKeys + ExistingKeys
@@ -929,25 +945,53 @@ class MainWindow(QMainWindow):
         self.UrlErrorLabel.setVisible(False)
         self.RefreshList()
 
-    def StartFetchInfo(self, Key: str, Url: str):
-        """启动后台获取视频信息"""
-        Thread = FetchInfoThread(self.TaskMgr, Key, Url)
-        Thread.Finished.connect(self.OnFetchInfoFinished)
-        self.FetchThreads.append(Thread)
-        Thread.start()
+    def StartValidation(self):
+        """启动后台信息校验（单线程逐个校验）"""
+        # 如果正在校验，不重复启动
+        if hasattr(self, "ValidateThread") and self.ValidateThread and self.ValidateThread.isRunning():
+            return
+        # 如果正在处理任务，不启动校验
+        if self.ProcessThread and self.ProcessThread.isRunning():
+            return
 
-    def OnFetchInfoFinished(self, Key: str, Success: bool):
-        """视频信息获取完成"""
-        Task = self.TaskMgr.Get(Key)
-        if Success and Task:
-            Log(f"信息获取完成: {Task.get('Title', '')[:30]}", Key)
-        else:
-            Log(f"获取信息失败", Key)
-        # 刷新列表和详情（保持选中）
+        self.ValidateThread = ValidateInfoThread(self.TaskMgr)
+        self.ValidateThread.Started.connect(self.OnValidateStarted)
+        self.ValidateThread.TaskStarted.connect(self.OnValidateTaskStarted)
+        self.ValidateThread.TaskFixed.connect(self.OnTaskFixed)
+        self.ValidateThread.Finished.connect(self.OnValidateFinished)
+        self.ValidateThread.start()
+
+    def OnValidateStarted(self, Total: int):
+        """校验流程开始"""
+        Log(f"Validating {Total} tasks...")
+
+    def OnValidateTaskStarted(self, Key: str):
+        """开始校验某个任务"""
+        # 刷新列表以显示 Validating 状态
         self.RefreshList()
+        Task = self.TaskMgr.Get(Key)
         if self.CurKey == Key and Task:
             self.UpdateDetail(Key, Task)
-        # 尝试启动自动处理
+
+    def OnTaskFixed(self, Key: str, Fixed: list, Failed: list, Cleaned: int):
+        """单个任务校验完成"""
+        if Fixed:
+            Log(f"Fixed: {', '.join(Fixed)}", Key)
+        if Failed:
+            Log(f"Failed to fix: {', '.join(Failed)}", Key)
+        if Cleaned > 0:
+            Log(f"Cleaned {Cleaned} cache files", Key)
+        # 刷新列表和详情
+        self.RefreshList()
+        Task = self.TaskMgr.Get(Key)
+        if self.CurKey == Key and Task:
+            self.UpdateDetail(Key, Task)
+
+    def OnValidateFinished(self, FixedCount: int, FailedCount: int, CleanedCount: int):
+        """全部校验完成"""
+        if FixedCount > 0 or FailedCount > 0 or CleanedCount > 0:
+            Log(f"Validation complete: {FixedCount} fixed, {FailedCount} failed, {CleanedCount} files cleaned")
+        # 校验完成后尝试启动正常处理流程
         self.TryStartProcessing()
 
     def SelectProcessingTask(self):
@@ -972,6 +1016,10 @@ class MainWindow(QMainWindow):
 
     def TryStartProcessing(self):
         """尝试启动下一个任务的处理（如果当前没有在处理）"""
+        # 如果正在校验任务信息，等校验完成再启动
+        if self.ValidateThread and self.ValidateThread.isRunning():
+            return
+
         # 如果已有任务在处理，不启动新的
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
@@ -1202,6 +1250,7 @@ class MainWindow(QMainWindow):
         Status = Task["Status"]
         StatusText = {
             "queued": "等待中",
+            "validating": "校验中...",
             "downloading": "下载中...",
             "extracting": "提取中...",
             "recognizing": "识别中...",
@@ -1261,6 +1310,7 @@ class MainWindow(QMainWindow):
 
         StatusText = {
             "queued": "等待中",
+            "validating": "校验中...",
             "downloading": "下载中...",
             "extracting": "提取中...",
             "recognizing": "识别中...",
@@ -1431,28 +1481,44 @@ class MainWindow(QMainWindow):
         # 重新执行子菜单
         ResetMenu = Menu.addMenu("重新执行")
 
+        # 检测任务实际进度（根据文件存在判断）
+        TaskDir = self.TaskMgr.GetTaskDir(Key)
+        HasVideo = (TaskDir / "video.mp4").exists()
+        HasAudio = (TaskDir / "audio.wav").exists()
+        HasEnSrt = (TaskDir / "en.srt").exists()
+        HasZhSrt = (TaskDir / "zh-cn.srt").exists()
+        HasZhAudio = (TaskDir / "zh-cn.wav").exists()
+        HasOutput = (TaskDir / "output.mp4").exists()
+
         ResetAllAction = ResetMenu.addAction("全部重新执行")
         ResetAllAction.triggered.connect(lambda: self.OnResetTask(Key, "all"))
 
         ResetMenu.addSeparator()
 
+        # 各阶段选项（只有已完成的阶段才能重新开始）
         ResetDownloadAction = ResetMenu.addAction("从下载开始")
         ResetDownloadAction.triggered.connect(lambda: self.OnResetTask(Key, "download"))
+        ResetDownloadAction.setEnabled(HasVideo)  # 有视频才能重新下载
 
         ResetExtractAction = ResetMenu.addAction("从提取音频开始")
         ResetExtractAction.triggered.connect(lambda: self.OnResetTask(Key, "extract"))
+        ResetExtractAction.setEnabled(HasAudio)  # 有音频才能重新提取
 
         ResetRecognizeAction = ResetMenu.addAction("从语音识别开始")
         ResetRecognizeAction.triggered.connect(lambda: self.OnResetTask(Key, "recognize"))
+        ResetRecognizeAction.setEnabled(HasEnSrt)  # 有英文字幕才能重新识别
 
         ResetTranslateAction = ResetMenu.addAction("从翻译开始")
         ResetTranslateAction.triggered.connect(lambda: self.OnResetTask(Key, "translate"))
+        ResetTranslateAction.setEnabled(HasZhSrt)  # 有中文字幕才能重新翻译
 
         ResetDubAction = ResetMenu.addAction("从配音开始")
         ResetDubAction.triggered.connect(lambda: self.OnResetTask(Key, "dub"))
+        ResetDubAction.setEnabled(HasZhAudio)  # 有中文音频才能重新配音
 
         ResetMergeAction = ResetMenu.addAction("从合成开始")
         ResetMergeAction.triggered.connect(lambda: self.OnResetTask(Key, "merge"))
+        ResetMergeAction.setEnabled(HasOutput)  # 有输出视频才能重新合成
 
         Menu.addSeparator()
 
