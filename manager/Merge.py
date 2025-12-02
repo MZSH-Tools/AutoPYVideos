@@ -7,10 +7,11 @@ from Log import Log
 
 
 def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
-                          OutputPath: Path, ProgressCallback=None) -> bool:
+                          OutputPath: Path, TmpPath: Path, ProgressCallback=None) -> bool:
     """
     将视频、音频和字幕合并（硬字幕，烧录到视频画面）
     调用 videotrans 的 runffmpeg 接口
+    使用 _tmp 临时文件确保完整性
     """
     from videotrans.util.help_ffmpeg import runffmpeg
     from videotrans.configure import config
@@ -36,6 +37,9 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
     TempDir = None
 
     try:
+        # 开始前删除可能残留的临时文件
+        TmpPath.unlink(missing_ok=True)
+
         # 复制字幕到临时目录，然后 chdir 到该目录（避免路径问题）
         TempDir = Path(tempfile.mkdtemp())
         TempSrt = TempDir / "sub.srt"
@@ -44,7 +48,7 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
         # 切换到临时目录，字幕用相对路径（videotrans 的做法）
         os.chdir(TempDir)
 
-        # 构建 ffmpeg 参数（不包含 ffmpeg 本身，runffmpeg 会自动添加）
+        # 构建 ffmpeg 参数，输出到临时文件
         Cmd = [
             "-y",
             "-i", Path(VideoPath).as_posix(),
@@ -59,7 +63,7 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
             "-preset", config.settings.get('preset', 'fast'),
             "-movflags", "+faststart",
             "-shortest",
-            Path(OutputPath).as_posix()
+            TmpPath.as_posix()
         ]
 
         Log(f"硬字幕合成: 执行 ffmpeg (视频重编码)...")
@@ -70,7 +74,9 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
         if ProgressCallback:
             ProgressCallback(100, "完成")
 
-        if OutputPath.exists():
+        if TmpPath.exists():
+            # 完成后重命名为正式文件
+            TmpPath.rename(OutputPath)
             Log(f"硬字幕合成: 完成 -> {OutputPath}")
             return True
         else:
@@ -81,6 +87,8 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
         import traceback
         Log(f"硬字幕合成: 错误: {E}")
         Log(traceback.format_exc())
+        # 清理临时文件
+        TmpPath.unlink(missing_ok=True)
         return False
 
     finally:
@@ -92,10 +100,11 @@ def MergeWithHardSubtitle(VideoPath: Path, AudioPath: Path, SubtitlePath: Path,
 
 
 def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
-                    ProgressCallback=None) -> bool:
+                    TmpPath: Path, ProgressCallback=None) -> bool:
     """
     将视频和音频合并，替换原视频的音频轨道（无字幕）
     调用 videotrans 的 runffmpeg 接口
+    使用 _tmp 临时文件确保完整性
     """
     from videotrans.util.help_ffmpeg import runffmpeg
 
@@ -112,7 +121,10 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         ProgressCallback(10, "合并中...")
 
     try:
-        # 构建 ffmpeg 参数
+        # 开始前删除可能残留的临时文件
+        TmpPath.unlink(missing_ok=True)
+
+        # 构建 ffmpeg 参数，输出到临时文件
         Cmd = [
             "-y",
             "-i", Path(VideoPath).as_posix(),
@@ -124,7 +136,7 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
             "-b:a", "128k",
             "-movflags", "+faststart",
             "-shortest",
-            Path(OutputPath).as_posix()
+            TmpPath.as_posix()
         ]
 
         # 调用 videotrans 的 runffmpeg
@@ -133,7 +145,9 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         if ProgressCallback:
             ProgressCallback(100, "完成")
 
-        if OutputPath.exists():
+        if TmpPath.exists():
+            # 完成后重命名为正式文件
+            TmpPath.rename(OutputPath)
             Log(f"音视频合成: 完成 -> {OutputPath}")
             return True
         else:
@@ -144,6 +158,8 @@ def MergeVideoAudio(VideoPath: Path, AudioPath: Path, OutputPath: Path,
         import traceback
         Log(f"音视频合成: 错误: {E}")
         Log(traceback.format_exc())
+        # 清理临时文件
+        TmpPath.unlink(missing_ok=True)
         return False
 
 
@@ -159,6 +175,7 @@ def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
     HardSubtitle: 是否烧录硬字幕（默认 True）
     ProgressCallback: 进度回调 (percent, text)
     返回生成的视频文件路径
+    使用 _tmp 临时文件确保完整性
     """
     if OutputPath is None:
         OutputPath = VideoPath.parent / "output.mp4"
@@ -168,16 +185,19 @@ def MergeVideo(VideoPath: Path, AudioPath: Path, SubtitlePath: Path = None,
         Log(f"视频合成: 输出已存在，跳过: {OutputPath}")
         return OutputPath
 
+    # 临时文件路径（在扩展名前加 _tmp）
+    TmpPath = OutputPath.parent / f"{OutputPath.stem}_tmp{OutputPath.suffix}"
+
     if HardSubtitle and SubtitlePath and SubtitlePath.exists():
         # 烧录硬字幕（字幕永久嵌入画面）
-        Success = MergeWithHardSubtitle(VideoPath, AudioPath, SubtitlePath, OutputPath, ProgressCallback)
+        Success = MergeWithHardSubtitle(VideoPath, AudioPath, SubtitlePath, OutputPath, TmpPath, ProgressCallback)
         if Success:
             return OutputPath
         else:
             return None
     else:
         # 只替换音频（无字幕）
-        Success = MergeVideoAudio(VideoPath, AudioPath, OutputPath, ProgressCallback)
+        Success = MergeVideoAudio(VideoPath, AudioPath, OutputPath, TmpPath, ProgressCallback)
         if Success:
             return OutputPath
         else:

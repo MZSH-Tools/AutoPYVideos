@@ -39,6 +39,7 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     """
     使用 videotrans 的 tts.run 接口生成配音音频，并使用 SpeedRate 对齐时间轴
     完全依赖 videotrans 接口，有错误直接抛出
+    使用 _tmp 临时文件确保完整性：先输出到 zh-cn_tmp.wav，完成后重命名为 zh-cn.wav
     """
     from videotrans import tts
     from videotrans.configure import config
@@ -57,6 +58,9 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     if OutputPath.exists():
         Log(f"配音: 音频已存在，跳过: {OutputPath}")
         return (OutputPath, AlignedSrtPath) if AlignedSrtPath.exists() else (OutputPath, None)
+
+    # 临时文件路径（在扩展名前加 _tmp）
+    TmpPath = OutputPath.parent / f"{OutputPath.stem}_tmp{OutputPath.suffix}"
 
     # 解析字幕
     Subtitles = Srt.Parse(SrtPath)
@@ -84,6 +88,9 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
     OrigBoxTts = config.box_tts
 
     try:
+        # 开始前删除可能残留的临时文件
+        TmpPath.unlink(missing_ok=True)
+
         config.box_tts = 'ing'
 
         if ProgressCallback:
@@ -142,12 +149,13 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 
         Log(f"配音: 调用 SpeedRate, 总时长={RawTotalTime}ms")
 
+        # SpeedRate 输出到临时文件
         RateInst = SpeedRate(
             queue_tts=QueueTtsCopy,
             shoud_audiorate=VoiceAutorate,
             shoud_videorate=VideoSlowdown,
             raw_total_time=RawTotalTime,
-            target_audio=str(OutputPath),
+            target_audio=str(TmpPath),
             cache_folder=str(CacheDir),
             novoice_mp4=NovoiceMp4,
             remove_silent_mid=RemoveSilentMid,
@@ -159,11 +167,11 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
 
         UpdatedQueueTts = RateInst.run()
 
-        # 检查输出
-        if not OutputPath.exists():
+        # 检查临时文件输出
+        if not TmpPath.exists():
             raise RuntimeError("SpeedRate 未生成输出音频")
 
-        Size = OutputPath.stat().st_size
+        Size = TmpPath.stat().st_size
         if Size < 1000:
             raise RuntimeError(f"SpeedRate 输出音频太小: {Size} 字节")
 
@@ -174,11 +182,19 @@ def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
         if VideoSlowdown and UpdatedQueueTts:
             NewSrtPath = _GenerateAlignedSrt(UpdatedQueueTts, OutputPath.parent)
 
+        # 完成后重命名为正式文件
+        TmpPath.rename(OutputPath)
+
         if ProgressCallback:
             ProgressCallback(100, "完成")
 
         Log(f"配音: 完成 -> {OutputPath}")
         return (OutputPath, NewSrtPath)
+
+    except Exception:
+        # 出错时清理临时文件
+        TmpPath.unlink(missing_ok=True)
+        raise
 
     finally:
         config.box_tts = OrigBoxTts
