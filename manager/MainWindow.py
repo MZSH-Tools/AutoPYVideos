@@ -975,11 +975,14 @@ class MainWindow(QMainWindow):
 
     def OnTaskFixed(self, Key: str, Fixed: list, Failed: list, Cleaned: int):
         """单个任务校验完成"""
+        # 已发布任务清理后不记录日志（避免重新创建刚删除的日志文件）
+        Task = self.TaskMgr.Get(Key)
+        IsPublished = Task and Task.get("Status") == TaskStatus.Published.value
         if Fixed:
             Log(f"Fixed: {', '.join(Fixed)}", Key)
         if Failed:
             Log(f"Failed to fix: {', '.join(Failed)}", Key)
-        if Cleaned > 0:
+        if Cleaned > 0 and not IsPublished:
             Log(f"Cleaned {Cleaned} cache files", Key)
         # 刷新列表和详情
         self.RefreshList()
