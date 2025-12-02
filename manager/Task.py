@@ -99,12 +99,13 @@ class TaskManager:
 
         TaskDir = self.GetTaskDir(Key)
         InfoPath = TaskDir / "info.json"
-        LogPath = TaskDir / "log.txt"
         with open(InfoPath, "w", encoding="utf-8") as F:
             json.dump(Task, F, ensure_ascii=False, indent=2)
-        # 同步创建 log.txt（如不存在）
-        if not LogPath.exists():
-            LogPath.touch()
+        # 已排除任务不创建日志文件
+        if Status != TaskStatus.Excluded.value:
+            LogPath = TaskDir / "log.txt"
+            if not LogPath.exists():
+                LogPath.touch()
 
     def GetTaskDir(self, Key: str) -> Path:
         """获取任务目录"""

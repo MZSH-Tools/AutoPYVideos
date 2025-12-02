@@ -844,6 +844,10 @@ class MainWindow(QMainWindow):
 
     def SaveTaskLog(self, Key: str, LogLine: str):
         """保存日志到任务目录"""
+        # 已排除任务不记录日志
+        Task = self.TaskMgr.Get(Key)
+        if Task and Task.get("Status") == "excluded":
+            return
         TaskDir = self.TaskMgr.GetTaskDir(Key)
         LogPath = TaskDir / "log.txt"
         try:
@@ -1732,6 +1736,8 @@ class MainWindow(QMainWindow):
         )
         if Reply != QMessageBox.StandardButton.Yes:
             return
+        # 先更新状态为已排除（阻止后续日志写入）
+        self.TaskMgr.Update(Key, Status=TaskStatus.Excluded)
         # 清理缓存文件（只保留 info.json）
         TaskDir = self.TaskMgr.GetTaskDir(Key)
         for F in TaskDir.iterdir():
@@ -1741,9 +1747,7 @@ class MainWindow(QMainWindow):
                 elif F.is_dir():
                     import shutil
                     shutil.rmtree(F)
-        # 更新状态为已排除
-        self.TaskMgr.Update(Key, Status=TaskStatus.Excluded)
-        Log(f"任务已排除", Key)
+        Log(f"Task excluded", Key)
         self.RefreshList()
         # 更新详情
         if self.CurKey == Key:
