@@ -4,7 +4,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFrame, QSplitter, QApplication, QTextEdit, QMenu, QMessageBox, QCheckBox
+    QLabel, QFrame, QSplitter, QApplication, QTextEdit, QMenu, QMessageBox, QButtonGroup
 )
 from PySide6.QtCore import Signal, Qt, QThread, QObject, QTimer
 from PySide6.QtGui import QCloseEvent, QColor, QAction
@@ -616,23 +616,31 @@ class MainWindow(QMainWindow):
         LeftListLayout.setContentsMargins(0, 0, 0, 0)
         LeftListLayout.setSpacing(5)
 
-        # 状态筛选器（仅搜索框为空时生效）
+        # 状态筛选器（标签式单选，仅搜索框为空时生效）
         FilterLayout = QHBoxLayout()
-        FilterLayout.setSpacing(8)
-        self.FilterPublished = QCheckBox("已发布")
-        self.FilterReady = QCheckBox("待发布")
-        self.FilterQueued = QCheckBox("队列中")
-        # 默认仅显示队列中
-        self.FilterPublished.setChecked(False)
-        self.FilterReady.setChecked(False)
+        FilterLayout.setSpacing(4)
+        FilterLayout.setContentsMargins(0, 0, 0, 0)
+        # 三个标签各自的颜色
+        self.FilterQueued = QPushButton("队列中")
+        self.FilterReady = QPushButton("待发布")
+        self.FilterPublished = QPushButton("已发布")
+        self.FilterBtns = [self.FilterQueued, self.FilterReady, self.FilterPublished]
+        FilterColors = ["#0078d4", "#e6a700", "#28a745"]  # 蓝、黄、绿
+        for i, Btn in enumerate(self.FilterBtns):
+            Btn.setCheckable(True)
+            Btn.setProperty("filterColor", FilterColors[i])
+            self._UpdateFilterBtnStyle(Btn)
+        # 默认选中队列中
         self.FilterQueued.setChecked(True)
-        # 连接信号
-        self.FilterPublished.stateChanged.connect(self.OnStatusFilterChanged)
-        self.FilterReady.stateChanged.connect(self.OnStatusFilterChanged)
-        self.FilterQueued.stateChanged.connect(self.OnStatusFilterChanged)
-        FilterLayout.addWidget(self.FilterPublished)
-        FilterLayout.addWidget(self.FilterReady)
+        # 按钮组实现单选
+        self.FilterGroup = QButtonGroup(self)
+        self.FilterGroup.addButton(self.FilterQueued, 0)
+        self.FilterGroup.addButton(self.FilterReady, 1)
+        self.FilterGroup.addButton(self.FilterPublished, 2)
+        self.FilterGroup.buttonClicked.connect(self.OnStatusFilterChanged)
         FilterLayout.addWidget(self.FilterQueued)
+        FilterLayout.addWidget(self.FilterReady)
+        FilterLayout.addWidget(self.FilterPublished)
         FilterLayout.addStretch()
         LeftListLayout.addLayout(FilterLayout)
 
@@ -941,6 +949,7 @@ class MainWindow(QMainWindow):
         # 设置筛选并刷新
         self.FilterKeys = AddedKeys + ExistingKeys
         self.ClearBtn.setVisible(True)
+        self._SetFilterEnabled(False)
         self.RefreshList()
 
         # 选中第一个任务
@@ -970,6 +979,7 @@ class MainWindow(QMainWindow):
         self.FilterKeys = None
         self.ClearBtn.setVisible(False)
         self.UrlErrorLabel.setVisible(False)
+        self._SetFilterEnabled(True)
         self.RefreshList()
 
     def StartValidation(self):
@@ -1276,18 +1286,57 @@ class MainWindow(QMainWindow):
         self.TaskList.verticalScrollBar().setValue(ScrollPos)
         self.TaskList.blockSignals(False)
 
+    def _UpdateFilterBtnStyle(self, Btn: QPushButton):
+        """更新筛选按钮样式（书签样式）"""
+        Color = Btn.property("filterColor")
+        Enabled = Btn.isEnabled()
+        if Enabled:
+            Btn.setStyleSheet(f"""
+                QPushButton {{
+                    border: none;
+                    border-bottom: 3px solid transparent;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                    background: transparent;
+                    color: #666;
+                }}
+                QPushButton:checked {{
+                    color: {Color};
+                    border-bottom: 3px solid {Color};
+                    font-weight: bold;
+                }}
+                QPushButton:hover:!checked {{
+                    color: #333;
+                }}
+            """)
+        else:
+            Btn.setStyleSheet("""
+                QPushButton {
+                    border: none;
+                    border-bottom: 3px solid transparent;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                    background: transparent;
+                    color: #bbb;
+                }
+            """)
+
+    def _SetFilterEnabled(self, Enabled: bool):
+        """设置筛选按钮启用状态"""
+        for Btn in self.FilterBtns:
+            Btn.setEnabled(Enabled)
+            self._UpdateFilterBtnStyle(Btn)
+
     def _PassStatusFilter(self, Status: str) -> bool:
         """检查状态是否通过筛选器"""
-        # 已发布
-        if Status == "published":
-            return self.FilterPublished.isChecked()
-        # 待发布
-        if Status == "ready":
-            return self.FilterReady.isChecked()
-        # 队列中（等待中、处理中、暂停、失败等）
-        return self.FilterQueued.isChecked()
+        FilterId = self.FilterGroup.checkedId()
+        if FilterId == 2:
+            return Status == "published"
+        if FilterId == 1:
+            return Status == "ready"
+        return Status not in ("published", "ready")
 
-    def OnStatusFilterChanged(self, State: int):
+    def OnStatusFilterChanged(self, Btn):
         """状态筛选器变化时刷新列表"""
         self.RefreshList()
 
