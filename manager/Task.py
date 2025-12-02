@@ -204,14 +204,10 @@ class TaskManager:
         if not Task:
             return {"Fixed": [], "Failed": ["Task not found"], "Cleaned": 0}
 
-        # 已发布任务：清理所有文件（保留 info.json）
-        if Task.get("Status") == TaskStatus.Published.value:
+        # 已发布/已排除任务：清理所有文件（保留 info.json）
+        if Task.get("Status") in [TaskStatus.Published.value, TaskStatus.Excluded.value]:
             Count = self.CleanupPublishedTask(Key)
             return {"Fixed": [], "Failed": [], "Cleaned": Count}
-
-        # 已排除任务：跳过校验
-        if Task.get("Status") == TaskStatus.Excluded.value:
-            return {"Fixed": [], "Failed": [], "Cleaned": 0}
 
         # 先检测问题
         Problems = self.CheckInfo(Key)
@@ -297,11 +293,12 @@ class TaskManager:
         return Result
 
     def GetTasksNeedValidation(self) -> list[str]:
-        """获取需要校验的任务列表（所有任务：已发布需清理，未发布需检测信息）"""
+        """获取需要校验的任务列表（已发布/已排除需清理，未发布需检测信息）"""
         Keys = []
         for Key, Task in self.Tasks.items():
-            # 已发布任务：检查是否需要清理文件
-            if Task.get("Status") == TaskStatus.Published.value:
+            Status = Task.get("Status")
+            # 已发布/已排除任务：检查是否需要清理文件
+            if Status in [TaskStatus.Published.value, TaskStatus.Excluded.value]:
                 TaskDir = self.GetTaskDir(Key)
                 # 如果目录中有除 info.json 外的文件，需要清理
                 HasFiles = any(F.name != "info.json" for F in TaskDir.iterdir() if F.is_file())
