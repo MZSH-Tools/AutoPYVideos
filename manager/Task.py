@@ -23,16 +23,20 @@ class TaskStatus(Enum):
     Ready = "ready"
     Published = "published"
     Failed = "failed"
+    Excluded = "excluded"  # 已排除（不再处理）
 
 
 def InferStatus(TaskDir: Path) -> TaskStatus:
     """根据目录内文件推断任务状态（只区分已完成/未完成）"""
-    # 检查是否已发布
     InfoPath = TaskDir / "info.json"
     if InfoPath.exists():
         try:
             with open(InfoPath, "r", encoding="utf-8") as F:
                 Info = json.load(F)
+                # 检查是否已排除
+                if Info.get("Status") == TaskStatus.Excluded.value:
+                    return TaskStatus.Excluded
+                # 检查是否已发布
                 if Info.get("PublishUrl"):
                     return TaskStatus.Published
         except:
@@ -201,6 +205,10 @@ class TaskManager:
         if Task.get("Status") == TaskStatus.Published.value:
             Count = self.CleanupPublishedTask(Key)
             return {"Fixed": [], "Failed": [], "Cleaned": Count}
+
+        # 已排除任务：跳过校验
+        if Task.get("Status") == TaskStatus.Excluded.value:
+            return {"Fixed": [], "Failed": [], "Cleaned": 0}
 
         # 先检测问题
         Problems = self.CheckInfo(Key)

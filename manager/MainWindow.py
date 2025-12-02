@@ -496,6 +496,7 @@ StatusColors = {
     "ready": "#4CAF50",       # 绿色 - 待发布
     "published": "#9E9E9E",   # 浅灰 - 已发布
     "failed": "#F44336",      # 红色 - 失败
+    "excluded": "#BDBDBD",    # 更浅灰 - 已排除
 }
 
 
@@ -620,12 +621,13 @@ class MainWindow(QMainWindow):
         FilterLayout = QHBoxLayout()
         FilterLayout.setSpacing(4)
         FilterLayout.setContentsMargins(0, 0, 0, 0)
-        # 三个标签各自的颜色
+        # 四个标签各自的颜色
         self.FilterQueued = QPushButton("队列中")
         self.FilterReady = QPushButton("待发布")
         self.FilterPublished = QPushButton("已发布")
-        self.FilterBtns = [self.FilterQueued, self.FilterReady, self.FilterPublished]
-        FilterColors = ["#0078d4", "#e6a700", "#28a745"]  # 蓝、黄、绿
+        self.FilterExcluded = QPushButton("已排除")
+        self.FilterBtns = [self.FilterQueued, self.FilterReady, self.FilterPublished, self.FilterExcluded]
+        FilterColors = ["#0078d4", "#e6a700", "#28a745", "#999"]  # 蓝、黄、绿、灰
         for i, Btn in enumerate(self.FilterBtns):
             Btn.setCheckable(True)
             Btn.setProperty("filterColor", FilterColors[i])
@@ -637,10 +639,12 @@ class MainWindow(QMainWindow):
         self.FilterGroup.addButton(self.FilterQueued, 0)
         self.FilterGroup.addButton(self.FilterReady, 1)
         self.FilterGroup.addButton(self.FilterPublished, 2)
+        self.FilterGroup.addButton(self.FilterExcluded, 3)
         self.FilterGroup.buttonClicked.connect(self.OnStatusFilterChanged)
         FilterLayout.addWidget(self.FilterQueued)
         FilterLayout.addWidget(self.FilterReady)
         FilterLayout.addWidget(self.FilterPublished)
+        FilterLayout.addWidget(self.FilterExcluded)
         FilterLayout.addStretch()
         LeftListLayout.addLayout(FilterLayout)
 
@@ -1201,8 +1205,8 @@ class MainWindow(QMainWindow):
         CurIndex = -1
         if Status in Stages:
             CurIndex = Stages.index(Status)
-        elif Status in ["ready", "published"]:
-            CurIndex = len(Stages)  # 全部完成
+        elif Status in ["ready", "published", "excluded"]:
+            CurIndex = len(Stages)  # 全部完成或已排除
 
         for I, Stage in enumerate(Stages):
             Label = self.StageLabels.get(Stage)
@@ -1330,11 +1334,14 @@ class MainWindow(QMainWindow):
     def _PassStatusFilter(self, Status: str) -> bool:
         """检查状态是否通过筛选器"""
         FilterId = self.FilterGroup.checkedId()
+        if FilterId == 3:
+            return Status == "excluded"
         if FilterId == 2:
             return Status == "published"
         if FilterId == 1:
             return Status == "ready"
-        return Status not in ("published", "ready")
+        # 队列中：排除 published/ready/excluded
+        return Status not in ("published", "ready", "excluded")
 
     def OnStatusFilterChanged(self, Btn):
         """状态筛选器变化时刷新列表"""
@@ -1359,6 +1366,7 @@ class MainWindow(QMainWindow):
             "ready": "待发布",
             "published": "已发布",
             "failed": "失败",
+            "excluded": "已排除",
         }.get(Status, Status)
         Color = StatusColors.get(Status, "#666666")
 
@@ -1419,6 +1427,7 @@ class MainWindow(QMainWindow):
             "ready": "待发布",
             "published": "已发布",
             "failed": "失败",
+            "excluded": "已排除",
         }.get(Status, Status)
 
         Color = StatusColors.get(Status, "#666666")
@@ -1564,17 +1573,18 @@ class MainWindow(QMainWindow):
             return
 
         Menu = QMenu(self)
+        Status = Task.get("Status")
 
-        # 优先处理/取消优先
-        IsPriority = self.TaskMgr.IsPriority(Key)
-        if IsPriority:
-            CancelPriorityAction = Menu.addAction("取消优先")
-            CancelPriorityAction.triggered.connect(lambda: self.OnCancelPriority(Key))
-        else:
-            PriorityAction = Menu.addAction("优先处理")
-            PriorityAction.triggered.connect(lambda: self.OnSetPriority(Key))
-
-        Menu.addSeparator()
+        # 优先处理/取消优先（已排除任务不显示）
+        if Status != "excluded":
+            IsPriority = self.TaskMgr.IsPriority(Key)
+            if IsPriority:
+                CancelPriorityAction = Menu.addAction("取消优先")
+                CancelPriorityAction.triggered.connect(lambda: self.OnCancelPriority(Key))
+            else:
+                PriorityAction = Menu.addAction("优先处理")
+                PriorityAction.triggered.connect(lambda: self.OnSetPriority(Key))
+            Menu.addSeparator()
 
         # 重新执行子菜单
         ResetMenu = Menu.addMenu("重新执行")
@@ -1619,6 +1629,11 @@ class MainWindow(QMainWindow):
         ResetMergeAction.setEnabled(HasOutput)  # 有输出视频才能重新合成
 
         Menu.addSeparator()
+
+        # 排除任务（已排除状态不显示此选项）
+        if Status != "excluded":
+            ExcludeAction = Menu.addAction("排除任务")
+            ExcludeAction.triggered.connect(lambda: self.OnExcludeTask(Key))
 
         # 清理日志
         ClearLogAction = Menu.addAction("清理日志")
@@ -1702,6 +1717,38 @@ class MainWindow(QMainWindow):
             self.TryStartProcessing()
         else:
             Log(f"任务重置失败", Key)
+
+    def OnExcludeTask(self, Key: str):
+        """排除任务"""
+        Task = self.TaskMgr.Get(Key)
+        if not Task:
+            return
+        # 确认对话框
+        Reply = QMessageBox.question(
+            self, "确认排除",
+            f"确定要排除该任务吗？\n排除后将清理缓存文件，仅保留 info.json。\n该视频以后不会再被自动处理。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if Reply != QMessageBox.StandardButton.Yes:
+            return
+        # 清理缓存文件（只保留 info.json）
+        TaskDir = self.TaskMgr.GetTaskDir(Key)
+        for F in TaskDir.iterdir():
+            if F.name != "info.json":
+                if F.is_file():
+                    F.unlink()
+                elif F.is_dir():
+                    import shutil
+                    shutil.rmtree(F)
+        # 更新状态为已排除
+        self.TaskMgr.Update(Key, Status=TaskStatus.Excluded)
+        Log(f"任务已排除", Key)
+        self.RefreshList()
+        # 更新详情
+        if self.CurKey == Key:
+            Task = self.TaskMgr.Get(Key)
+            self.UpdateDetail(Key, Task)
 
     def OnDeleteTask(self, Key: str):
         """删除任务"""
