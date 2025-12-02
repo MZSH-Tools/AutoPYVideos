@@ -1055,7 +1055,6 @@ class MainWindow(QMainWindow):
 
     def OnProcessProgress(self, Key: str, Percent: int, Stage: str, Speed: float):
         """处理进度更新"""
-        self.RefreshList()
         self.CurSpeed = Speed
         # 更新流水线显示（当前处理任务）
         Task = self.TaskMgr.Get(Key)
@@ -1223,9 +1222,10 @@ class MainWindow(QMainWindow):
             self.DetailProgressLabel.setText(f"{Percent}%")
 
     def RefreshList(self):
-        """刷新任务列表（保持选中状态，支持筛选）"""
-        # 记住当前选中的 Key
+        """刷新任务列表（保持选中状态和滚动位置，支持筛选）"""
+        # 记住当前选中的 Key 和滚动位置
         SelectedKey = self.CurKey
+        ScrollPos = self.TaskList.verticalScrollBar().value()
         # 阻止信号避免触发 OnTaskSelected
         self.TaskList.blockSignals(True)
         self.TaskList.clear()
@@ -1236,13 +1236,14 @@ class MainWindow(QMainWindow):
                 continue
             Item = self.CreateListItem(Key, Task)
             self.TaskList.addItem(Item)
-        # 恢复选中
+        # 恢复选中和滚动位置
         if SelectedKey:
             for I in range(self.TaskList.count()):
                 Item = self.TaskList.item(I)
                 if Item.data(Qt.ItemDataRole.UserRole) == SelectedKey:
                     self.TaskList.setCurrentItem(Item)
                     break
+        self.TaskList.verticalScrollBar().setValue(ScrollPos)
         self.TaskList.blockSignals(False)
 
     def CreateListItem(self, Key: str, Task: dict) -> QListWidgetItem:
