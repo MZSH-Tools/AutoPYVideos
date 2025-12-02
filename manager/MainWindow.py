@@ -485,18 +485,18 @@ class ProcessThread(QThread):
 # 状态对应颜色
 StatusColors = {
     "queued": "#888888",      # 灰色 - 等待中
-    "validating": "#607D8B",  # 蓝灰 - 校验中
-    "downloading": "#2196F3", # 蓝色 - 下载中
-    "extracting": "#9C27B0",  # 紫色 - 提取中
-    "recognizing": "#FF9800", # 橙色 - 识别中
-    "translating": "#00BCD4", # 青色 - 翻译中
-    "dubbing": "#3F51B5",     # 靛蓝 - 配音中
-    "merging": "#795548",     # 棕色 - 合成中
-    "paused": "#FFC107",      # 黄色 - 已暂停
-    "ready": "#4CAF50",       # 绿色 - 待发布
-    "published": "#9E9E9E",   # 浅灰 - 已发布
+    "validating": "#2196F3",  # 蓝色 - 处理中
+    "downloading": "#2196F3", # 蓝色 - 处理中
+    "extracting": "#2196F3",  # 蓝色 - 处理中
+    "recognizing": "#2196F3", # 蓝色 - 处理中
+    "translating": "#2196F3", # 蓝色 - 处理中
+    "dubbing": "#2196F3",     # 蓝色 - 处理中
+    "merging": "#2196F3",     # 蓝色 - 处理中
+    "paused": "#2196F3",      # 蓝色 - 处理中
+    "ready": "#FFC107",       # 黄色 - 待发布
+    "published": "#4CAF50",   # 绿色 - 已发布
     "failed": "#F44336",      # 红色 - 失败
-    "excluded": "#BDBDBD",    # 更浅灰 - 已排除
+    "excluded": "#888888",    # 灰色 - 已排除
 }
 
 

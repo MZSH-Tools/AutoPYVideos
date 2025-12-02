@@ -91,8 +91,10 @@ class TaskManager:
         if Key not in self.Tasks:
             return
         Task = self.Tasks[Key].copy()
-        # 不保存运行时状态
-        Task.pop("Status", None)
+        # 不保存运行时状态（但保留 excluded 状态）
+        Status = Task.pop("Status", None)
+        if Status == TaskStatus.Excluded.value:
+            Task["Status"] = Status
         Task.pop("Progress", None)
 
         TaskDir = self.GetTaskDir(Key)
@@ -356,7 +358,7 @@ class TaskManager:
                     self.UrlIndex[V] = Key
             self.Tasks[Key][K] = V
             # 持久化字段需要保存
-            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "Priority"]:
+            if K in ["Title", "TitleZh", "Author", "Thumbnail", "VideoId", "PublishUrl", "Url", "Priority", "Status"]:
                 NeedSave = True
         if NeedSave:
             self.SaveTask(Key)
