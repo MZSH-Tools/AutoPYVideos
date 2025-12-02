@@ -11,10 +11,6 @@ from videotrans.task.simple_runnable_qt import run_in_threadpool
 import os
 from videotrans.process._iscache import _MODELS
 import glob
-
-from videotrans.util import tools
-
-
 """
 faster-whisper
 内置的本地大模型不重试
@@ -31,13 +27,13 @@ class FasterAll(BaseRecogn):
     def _create_from_huggingface(self, model_id, audio_file, language):
         from transformers import pipeline
         from huggingface_hub import snapshot_download
-        from videotrans.process._iscache import check_huggingface_connect
+        from videotrans.process._iscache import _check_huggingface_connect
 
         # 定义本地保存路径
-        local_dir = f"{config.ROOT_DIR}/models/" + model_id.split("/")[-1]
+        local_dir = f"{config.DATA_DIR}/models/" + model_id.split("/")[-1]
 
         if not os.path.exists(local_dir) or len([it for it in Path(local_dir).glob('*')])<3:
-            check_huggingface_connect(config.ROOT_DIR, self.proxy_str)
+            _check_huggingface_connect(config.DATA_DIR, self.proxy_str)
             print(f"下载模型到 {local_dir}...")
             # 使用 snapshot_download 下载完整模型
             snapshot_download(
@@ -154,13 +150,12 @@ class FasterAll(BaseRecogn):
                     f.write(f'{process.pid}')
                 # 等待进程执行完毕
                 process.join()
-                self._signal(text="STT end, hold on...")
                 try:
                     if process.is_alive():
                         process.terminate()
                 except Exception:
                     pass
-
+                
                 if err['msg']:
                     logs(f'{err["msg"]}',level='warn')
                     self.error=err['msg']
@@ -168,8 +163,24 @@ class FasterAll(BaseRecogn):
                     if self.detect_language == 'auto':
                         logs(f'需要自动检测语言，当前检测出的语言为{detect["langcode"]=}')
                         self.detect_language = detect.get('langcode','auto')
+                    # 没有任何断句方式
+                    if self.split_type==1 or int(config.settings.get('rephrase',0))==0:
+                        return self.get_srtlist(raws)
+                    
+                    words_list = []
+                    for it in list(raws):
+                        words_list += it['words']
+                    if int(config.settings.get('rephrase',0))==1:
+                        # LLM断句
+                        try:
+                            self._signal(text=tr("Re-segmenting..."))                            
+                            return self.re_segment_sentences(words_list)
+                        except Exception as e:
+                            logs(f'LLM断句失败，将使用默认断句：{e}', level="except")
 
+                    # 断句失败或者没有断句
                     return self.get_srtlist(raws)
+                
         except Exception as e:
             logs(f'{e}', level="except")
             self.error = str(e)
@@ -187,26 +198,3 @@ class FasterAll(BaseRecogn):
         
         raise RuntimeError(err+"\n"+tr('Please also check whether CUDA12.8 and cudnn9 are installed correctly.'))
             
-    def get_srtlist(self, raws):
-        if self.jianfan:
-            import zhconv
-        srt_raws = []
-        raws=list(raws)
-        raws_len=len(raws)
-        for idx,i in enumerate(raws):
-            if self.jianfan:
-                self._signal(text=f"简繁转换中 [{idx+1}/{raws_len}]...")
-            if len(i['words']) < 1:
-                continue
-            tmp = {
-                'text': zhconv.convert(i['text'], 'zh-hans') if self.jianfan else i[
-                    'text'],
-                'start_time': int(i['words'][0]['start'] * 1000),
-                'end_time': int(i['words'][-1]['end'] * 1000)
-            }
-            tmp['startraw'] = tools.ms_to_time_string(ms=tmp['start_time'])
-            tmp['endraw'] = tools.ms_to_time_string(ms=tmp['end_time'])
-            tmp['time'] = f"{tmp['startraw']} --> {tmp['endraw']}"
-            srt_raws.append(tmp)
-
-        return srt_raws

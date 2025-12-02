@@ -25,9 +25,9 @@ def resample_audio(audio, sample_rate, target_sample_rate):
 
 def init_speaker_diarization(language,num_speakers=-1):
     import sherpa_onnx
-    segmentation_model = f"{cfg.ROOT_DIR}/models/onnx/seg_model.onnx"
+    segmentation_model = f"{cfg.DATA_DIR}/models/onnx/seg_model.onnx"
     embedding_extractor_model = (
-        f"{cfg.ROOT_DIR}/models/onnx/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx"  if language=='zh' else   f"{cfg.ROOT_DIR}/models/onnx/nemo_en_titanet_small.onnx" 
+        f"{cfg.DATA_DIR}/models/onnx/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx"  if language=='zh' else   f"{cfg.DATA_DIR}/models/onnx/nemo_en_titanet_small.onnx"
     )
 
     config = sherpa_onnx.OfflineSpeakerDiarizationConfig(

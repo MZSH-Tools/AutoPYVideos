@@ -18,10 +18,10 @@ from videotrans.util import tools
 import sounddevice as sd
 
 
-CTC_MODEL_FILE=f"{cfg.ROOT_DIR}/models/onnx/ctc.model.onnx"
-PAR_ENCODER = f"{cfg.ROOT_DIR}/models/onnx/encoder.onnx"
-PAR_DECODER = f"{cfg.ROOT_DIR}/models/onnx/decoder.onnx"
-PAR_TOKENS = f"{cfg.ROOT_DIR}/models/onnx/tokens.txt"
+CTC_MODEL_FILE=f"{cfg.DATA_DIR}/models/onnx/ctc.model.onnx"
+PAR_ENCODER = f"{cfg.DATA_DIR}/models/onnx/encoder.onnx"
+PAR_DECODER = f"{cfg.DATA_DIR}/models/onnx/decoder.onnx"
+PAR_TOKENS = f"{cfg.DATA_DIR}/models/onnx/tokens.txt"
 
 
 

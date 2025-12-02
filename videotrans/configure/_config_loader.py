@@ -23,30 +23,49 @@ def _get_executable_path():
         return Path(__file__).parent.parent.parent.as_posix()
 
 
+# 获取数据目录（与 manager/Storage.py 保持一致）
+def _get_data_dir():
+    # 优先使用外置硬盘缓存目录
+    ExternalCache = Path("/Volumes/MyNas/Cache/AutoPYVideos")
+    if ExternalCache.exists() or (ExternalCache.parent.exists() and ExternalCache.parent.parent.exists()):
+        ExternalCache.mkdir(parents=True, exist_ok=True)
+        return ExternalCache.as_posix()
+    # 回退到本地目录
+    if os.name == "nt":
+        Base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        Base = Path.home() / ".local" / "share"
+    DataDir = Base / "AutoPYVideos"
+    DataDir.mkdir(parents=True, exist_ok=True)
+    return DataDir.as_posix()
+
+
 _tmpname = f'tmp{os.getpid()}'
 
 SYS_TMP = Path(tempfile.gettempdir()).as_posix()
 # 程序根目录
 ROOT_DIR = _get_executable_path()
-# 程序根下临时目录tmp
-TEMP_DIR = f'{ROOT_DIR}/{_tmpname}'
-# 家目录
-HOME_DIR = ROOT_DIR + "/output"
+# 数据目录（缓存、日志、模型等）
+DATA_DIR = _get_data_dir()
+# 临时目录指向数据目录
+TEMP_DIR = f'{DATA_DIR}/{_tmpname}'
+# 家目录（输出目录）
+HOME_DIR = f'{DATA_DIR}/output'
 
 Path(TEMP_DIR + '/dubbing_cache').mkdir(exist_ok=True, parents=True)
 Path(TEMP_DIR + '/translate_cache').mkdir(exist_ok=True, parents=True)
 
 # 家目录下的临时文件存储目录
 TEMP_HOME = TEMP_DIR
-# 日志目录 logs
-Path(f"{ROOT_DIR}/logs").mkdir(parents=True, exist_ok=True)
+# 日志目录指向数据目录
+Path(f"{DATA_DIR}/logs").mkdir(parents=True, exist_ok=True)
 
 ###################################
 
 logger = logging.getLogger('VideoTrans')
 logger.setLevel(logging.INFO)
-# 创建文件处理器，并设置级别G
-_file_handler = logging.FileHandler(f'{ROOT_DIR}/logs/{datetime.datetime.now().strftime("%Y%m%d")}.log',
+# 创建文件处理器，日志存储到数据目录
+_file_handler = logging.FileHandler(f'{DATA_DIR}/logs/{datetime.datetime.now().strftime("%Y%m%d")}.log',
                                     encoding='utf-8')
 _file_handler.setLevel(logging.DEBUG)
 # 创建控制台处理器，并设置级别
@@ -78,8 +97,9 @@ if sys.platform == 'win32' and IS_FROZEN:
 
 os.environ['QT_API'] = 'pyside6'
 os.environ['SOFT_NAME'] = 'pyvideotrans'
-os.environ['MODELSCOPE_CACHE'] = ROOT_DIR + "/models"
-os.environ['HF_HOME'] = ROOT_DIR + "/models"
+# 模型缓存存储到数据目录
+os.environ['MODELSCOPE_CACHE'] = DATA_DIR + "/models"
+os.environ['HF_HOME'] = DATA_DIR + "/models"
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = 'true'
 os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = 'true'
 os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = "1200"

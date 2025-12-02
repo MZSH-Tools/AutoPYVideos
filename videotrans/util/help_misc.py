@@ -14,7 +14,7 @@ def show_download_tips(Win,tr_text=""):
     QApplication.clipboard().setText('https://github.com/jianchang512/stt/releases/download/0.0/2noise-uvr-speaker-realtime.7z')
     reply = QMessageBox.information(Win,
                 config.tr("The model is missing. Please download it!"),
-                config.tr("DownloadRealTimeModel",tr_text,f'{config.ROOT_DIR}/models/onnx')
+                config.tr("DownloadRealTimeModel",tr_text,f'{config.DATA_DIR}/models/onnx')
     )
     
 def show_download_tts(Win):

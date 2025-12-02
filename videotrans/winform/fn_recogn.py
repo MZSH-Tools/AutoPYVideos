@@ -126,7 +126,7 @@ def openwin():
                 deepseek.openwin()
                 return
         enable_diariz_is=winobj.enable_diariz.isChecked()
-        if enable_diariz_is and not Path(f'{config.ROOT_DIR}/models/onnx/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx').exists():
+        if enable_diariz_is and not Path(f'{config.DATA_DIR}/models/onnx/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx').exists():
             tools.show_download_tips(winobj,tr('Speaker'))
             return
         

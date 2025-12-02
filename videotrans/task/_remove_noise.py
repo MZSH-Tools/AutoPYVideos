@@ -17,7 +17,7 @@ from videotrans.util import tools
 
 def create_speech_denoiser(thread_nums=4):
     import sherpa_onnx
-    model_filename = f"{cfg.ROOT_DIR}/models/onnx/gtcrn_simple.onnx"
+    model_filename = f"{cfg.DATA_DIR}/models/onnx/gtcrn_simple.onnx"
     if not Path(model_filename).is_file():
         raise ValueError(
             "Please first download a model from "

@@ -30,6 +30,35 @@ def GetTasksDir() -> Path:
     return TasksDir
 
 
+def GetLogsDir() -> Path:
+    """获取日志目录"""
+    LogsDir = GetDataDir() / "logs"
+    LogsDir.mkdir(parents=True, exist_ok=True)
+    return LogsDir
+
+
+def GetModelsDir() -> Path:
+    """获取模型缓存目录"""
+    ModelsDir = GetDataDir() / "models"
+    ModelsDir.mkdir(parents=True, exist_ok=True)
+    return ModelsDir
+
+
+def GetTempDir() -> Path:
+    """获取临时文件目录（按进程 ID 隔离）"""
+    import os
+    TempDir = GetDataDir() / f"tmp{os.getpid()}"
+    TempDir.mkdir(parents=True, exist_ok=True)
+    return TempDir
+
+
+def GetOutputDir() -> Path:
+    """获取输出目录"""
+    OutputDir = GetDataDir() / "output"
+    OutputDir.mkdir(parents=True, exist_ok=True)
+    return OutputDir
+
+
 def ListTaskDirs() -> list[Path]:
     """遍历所有任务目录，按时间戳倒序"""
     TasksDir = GetTasksDir()
