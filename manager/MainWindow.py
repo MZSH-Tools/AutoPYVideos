@@ -390,7 +390,7 @@ class ProcessThread(QThread):
                     self.Progress.emit(self.Key, Percent, "dubbing", 0)
 
                 try:
-                    Voice = Config.Get("配音.声音角色", "晓晓 多语言(Female/CN)")
+                    Voice = Config.Get("配音.声音角色", "晓晓(Female/CN)")
                     VoiceAutorate = Config.Get("配音.音频加速", False)
                     VideoSlowdown = Config.Get("配音.视频慢放", True)
                     RemoveSilentMid = Config.Get("处理.删除间隙静音", False)

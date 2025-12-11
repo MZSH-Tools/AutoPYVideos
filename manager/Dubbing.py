@@ -32,7 +32,7 @@ def _GenerateAlignedSrt(QueueTts: list, OutputDir: Path) -> Path | None:
 
 
 def GenerateDubbing(SrtPath: Path, OutputPath: Path = None,
-                    Voice: str = "晓晓 多语言(Female/CN)", VideoPath: Path = None,
+                    Voice: str = "晓晓(Female/CN)", VideoPath: Path = None,
                     VoiceAutorate: bool = False, VideoSlowdown: bool = True,
                     RemoveSilentMid: bool = False, AlignSubAudio: bool = True,
                     ProgressCallback=None) -> tuple[Path, Path] | None:
