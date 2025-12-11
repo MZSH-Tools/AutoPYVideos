@@ -88,8 +88,8 @@ fw_logger.setLevel(logging.DEBUG)
 fw_logger.addHandler(_file_handler)
 
 
-FFMPEG_BIN = "ffmpeg"
-FFPROBE_BIN = "ffprobe"
+FFMPEG_BIN = "/opt/homebrew/bin/ffmpeg"
+FFPROBE_BIN = "/opt/homebrew/bin/ffprobe"
 # ffmpeg
 os.environ['PATH'] = ROOT_DIR +os.pathsep+f'{ROOT_DIR}/ffmpeg'+os.pathsep + os.environ.get("PATH", "")
 if sys.platform == 'win32' and IS_FROZEN:
