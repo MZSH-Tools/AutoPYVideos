@@ -5,7 +5,9 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 from PySide6.QtCore import QObject, Signal, QProcess
 
-from MainWindow import MainWindow, IsPaused, SetPaused, PauseEmitter, SetDelayedRestart, DelayedRestartEmitter
+from MainWindow import (MainWindow, IsPaused, SetPaused, PauseEmitter,
+                        SetDelayedRestart, DelayedRestartEmitter,
+                        SetDelayedQuit, DelayedQuitEmitter)
 
 
 class TrayIcon(QObject):
@@ -73,6 +75,18 @@ class TrayIcon(QObject):
         DelayedRestartEmitter.Changed.connect(self.OnDelayedRestartChanged)
         DelayedRestartEmitter.DoRestart.connect(self.DoSilentRestart)
 
+        Menu.addSeparator()
+
+        # 延迟退出菜单项（当前流程完成后退出）
+        self.DelayedQuitAction = QAction("延迟退出", Menu)
+        self.DelayedQuitAction.setCheckable(True)
+        self.DelayedQuitAction.setChecked(False)
+        self.DelayedQuitAction.triggered.connect(self.ToggleDelayedQuit)
+        Menu.addAction(self.DelayedQuitAction)
+        # 监听延迟退出状态变化
+        DelayedQuitEmitter.Changed.connect(self.OnDelayedQuitChanged)
+        DelayedQuitEmitter.DoQuit.connect(self.Quit)
+
         QuitAction = QAction("退出", Menu)
         QuitAction.triggered.connect(self.Quit)
         Menu.addAction(QuitAction)
@@ -114,6 +128,14 @@ class TrayIcon(QObject):
     def OnDelayedRestartChanged(self, DelayedRestart: bool):
         """延迟重启状态变化时更新菜单项"""
         self.DelayedRestartAction.setChecked(DelayedRestart)
+
+    def ToggleDelayedQuit(self, Checked: bool):
+        """切换延迟退出状态"""
+        SetDelayedQuit(Checked)
+
+    def OnDelayedQuitChanged(self, DelayedQuit: bool):
+        """延迟退出状态变化时更新菜单项"""
+        self.DelayedQuitAction.setChecked(DelayedQuit)
 
     def OnTrayActivated(self, Reason):
         """托盘图标被激活"""

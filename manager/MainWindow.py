@@ -41,6 +41,9 @@ IsPaused = False
 # 延迟重启状态（当前流程完成后重启）
 IsDelayedRestart = False
 
+# 延迟退出状态（当前流程完成后退出）
+IsDelayedQuit = False
+
 # 暂停状态变化信号
 class PauseSignal(QObject):
     Changed = Signal(bool)  # IsPaused
@@ -51,6 +54,12 @@ class DelayedRestartSignal(QObject):
     Changed = Signal(bool)  # IsDelayedRestart
     DoRestart = Signal()    # 触发实际重启
 DelayedRestartEmitter = DelayedRestartSignal()
+
+# 延迟退出状态变化信号
+class DelayedQuitSignal(QObject):
+    Changed = Signal(bool)  # IsDelayedQuit
+    DoQuit = Signal()       # 触发实际退出
+DelayedQuitEmitter = DelayedQuitSignal()
 
 
 def SetPaused(Paused: bool):
@@ -65,6 +74,13 @@ def SetDelayedRestart(DelayedRestart: bool):
     global IsDelayedRestart
     IsDelayedRestart = DelayedRestart
     DelayedRestartEmitter.Changed.emit(DelayedRestart)
+
+
+def SetDelayedQuit(DelayedQuit: bool):
+    """设置延迟退出状态"""
+    global IsDelayedQuit
+    IsDelayedQuit = DelayedQuit
+    DelayedQuitEmitter.Changed.emit(DelayedQuit)
 
 
 def Log(Msg: str, Key: str = None):
@@ -206,8 +222,8 @@ class ProcessThread(QThread):
         try:
             # 阶段 1: 下载视频
             if not VideoPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在下载前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在下载前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -240,8 +256,8 @@ class ProcessThread(QThread):
 
             # 阶段 2: 提取音频
             if not AudioPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在提取前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在提取前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -273,8 +289,8 @@ class ProcessThread(QThread):
 
             # 阶段 3: 语音识别
             if not EnSrtPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在识别前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在识别前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -313,8 +329,8 @@ class ProcessThread(QThread):
 
             # 阶段 4: 翻译（英文 → 中文）
             if not ZhSrtPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在翻译前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在翻译前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -356,8 +372,8 @@ class ProcessThread(QThread):
             # 阶段 5: 配音（中文 TTS）
             AlignedSrtPath = TaskDir / "aligned.srt"  # 对齐后的字幕（视频慢速时生成）
             if not ZhAudioPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在配音前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在配音前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -419,8 +435,8 @@ class ProcessThread(QThread):
 
             # 阶段 6: 合成（音视频合并）
             if not OutputPath.exists():
-                if IsPaused or IsDelayedRestart:
-                    Log(f"任务在合成前{'暂停' if IsPaused else '等待重启'}")
+                if IsPaused or IsDelayedRestart or IsDelayedQuit:
+                    Log(f"任务在合成前{'暂停' if IsPaused else '等待退出' if IsDelayedQuit else '等待重启'}")
                     self.TaskMgr.Update(self.Key, Status=TaskStatus.Paused)
                     self.Finished.emit(self.Key, False, False)
                     return
@@ -517,6 +533,8 @@ class MainWindow(QMainWindow):
         PauseEmitter.Changed.connect(self.OnPauseChanged)
         # 监听延迟重启状态变化
         DelayedRestartEmitter.Changed.connect(self.OnDelayedRestartChanged)
+        # 监听延迟退出状态变化
+        DelayedQuitEmitter.Changed.connect(self.OnDelayedQuitChanged)
         # 定时刷新日志显示
         self.LogTimer = QTimer(self)
         self.LogTimer.timeout.connect(self.RefreshLogDisplay)
@@ -1072,6 +1090,11 @@ class MainWindow(QMainWindow):
         if self.ProcessThread and self.ProcessThread.isRunning():
             return
 
+        # 检查延迟退出：没有任务在处理时触发退出
+        if IsDelayedQuit:
+            DelayedQuitEmitter.DoQuit.emit()
+            return
+
         # 检查延迟重启：没有任务在处理时触发重启
         if IsDelayedRestart:
             DelayedRestartEmitter.DoRestart.emit()
@@ -1148,9 +1171,20 @@ class MainWindow(QMainWindow):
             if not (self.ProcessThread and self.ProcessThread.isRunning()):
                 DelayedRestartEmitter.DoRestart.emit()
 
+    def OnDelayedQuitChanged(self, DelayedQuit: bool):
+        """延迟退出状态变化"""
+        self.UpdateStatusLabel()
+        if DelayedQuit:
+            # 如果没有任务在处理，立即触发退出
+            if not (self.ProcessThread and self.ProcessThread.isRunning()):
+                DelayedQuitEmitter.DoQuit.emit()
+
     def UpdateStatusLabel(self):
         """更新运行状态标签"""
-        if IsDelayedRestart:
+        if IsDelayedQuit:
+            self.StatusLabel.setText("● 待退出")
+            self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #F44336; padding: 10px 5px;")
+        elif IsDelayedRestart:
             self.StatusLabel.setText("● 待重启")
             self.StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold; color: #FF5722; padding: 10px 5px;")
         elif IsPaused:
