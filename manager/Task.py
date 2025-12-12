@@ -462,7 +462,7 @@ class TaskManager:
             "extract": ["audio.wav"],  # 提取阶段
             "recognize": ["en.srt"],  # 识别阶段
             "translate": ["zh-cn.srt", "bilingual.srt"],  # 翻译阶段
-            "dub": ["zh-cn.wav", "aligned.srt", "aligned_bilingual.srt"],  # 配音阶段
+            "dub": ["zh-cn.wav", "aligned.srt", "aligned_bilingual.srt", "video_slow.mp4"],  # 配音阶段
             "merge": ["output.mp4"],  # 合成阶段
         }
         StageOrder = ["download", "extract", "recognize", "translate", "dub", "merge"]

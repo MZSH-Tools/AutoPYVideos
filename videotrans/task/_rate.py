@@ -720,8 +720,9 @@ class SpeedRate:
             # 无分辨率信息时只使用 PTS
             vf_param = f'setpts={pts}*PTS' if pts else 'setpts=PTS'
 
-        cmd = ['-y',  '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t',
-               f'{(to - ss) / 1000.0}','-i', source,
+        # 使用output seeking(-ss在-i后面)确保精确裁切，避免关键帧不精确导致重复帧
+        cmd = ['-y', '-i', source,
+               '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t', f'{(to - ss) / 1000.0}',
                '-an', '-c:v', 'libx264',"-x264-params", "keyint=1:min-keyint=1:scenecut=0", '-preset', self.preset, '-crf', self.crf,
                '-pix_fmt', 'yuv420p', '-vf', vf_param, '-vsync', 'vfr', out]
         try:
@@ -729,8 +730,8 @@ class SpeedRate:
             if (not Path(out).exists() or Path(out).stat().st_size < 1024) and pts:
                 logs(f"[{subject}] 中间片段 {Path(out).name} 生成失败，尝试无PTS参数重试。",level='warn')
                 vf_retry = f'{scale_filter},setpts=PTS' if self.video_width and self.video_height else 'setpts=PTS'
-                tools.runffmpeg(['-y', '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t',
-                                 f'{(to - ss) / 1000.0}', '-i', source,
+                tools.runffmpeg(['-y', '-i', source,
+                                 '-ss', tools.ms_to_time_string(ms=ss, sepflag='.'), '-t', f'{(to - ss) / 1000.0}',
                                  '-an', '-c:v', 'libx264', '-preset', self.preset, '-crf', self.crf,
                                  '-pix_fmt', 'yuv420p', '-vf', vf_retry, '-vsync', 'vfr', out],
                                 force_cpu=True)
